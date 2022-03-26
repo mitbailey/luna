@@ -11,69 +11,24 @@
 
 #include <Wire.h>
 
-#define NUM_I2C_DEV 4
+#include <GLEE_Sensor.h>
+#include <TMP117.h>
+#include <MPU6000.h>
+#include <MLX90393.h>
+#include <CAP.h>
+#include <TPIS1385.h>
+#include <GLEE_Radio.h>
 
-// LunaSat V4 Sensors
-// AK09940 -- Magnetometer -- 0x0c
-// TMP117 --- Thermometer --- 0x48
-// TPIS1385 - Thermopile ---- 0x0d
-// ICM20602 - Accelerometer - 0x69
+#include "luna.hpp"
 
-// I2C Information
-uint8_t sensAddr[4] = {0x0c, 0x48, 0x0D, 0x69};
-uint8_t addr, err, n_devices;
+TMP117 *thermo = nullptr;
+MPU6000 *accel = nullptr;
+MLX90393 *magne = nullptr;
+CAP *cap = nullptr;
+TPIS1385 *pile = nullptr;
+LunaRadio *radio = nullptr;
 
-/**
- * @brief
- *
- * @param thorough If TRUE, checks all possible addresses for I2C.
- */
-void I2C_scan(bool thorough)
-{
-    uint8_t i_max = NUM_I2C_DEV;
-
-    if (thorough)
-    {
-        i_max = 127;
-    }
-
-    for (uint8_t i = 0; i <= i_max; i++)
-    {
-        Wire.beginTransmission(i);
-
-        switch (Wire.endTransmission())
-        {
-        case 0:
-            n_devices++;
-            Serial.print("Address ");
-            Serial.print(sensAddr[i], HEX);
-            Serial.print(".\n");
-            break;
-        case 1:
-            Serial.print("Error 1: Data too long to fit in transmit buffer.\n");
-            break;
-        case 2:
-            if (!thorough)
-                Serial.print("Error 2: Received NACK on transmit of address.\n");
-            break;
-        case 3:
-            Serial.print("Error 3: Received NACK on transmit of data.\n");
-            break;
-        case 4:
-            Serial.print("Error value 4 at address ");
-            Serial.print(sensAddr[i], HEX);
-            Serial.print(".\n");
-            break;
-        default:
-            break;
-        }
-    }
-
-    Serial.print("I2C scan complete: ");
-    Serial.print(n_devices);
-    Serial.print(" devices found.\n");
-}
-
+// Standard Arduino initialization function.
 void setup()
 {
     // I2C Initialization
@@ -88,6 +43,8 @@ void setup()
 
     Serial.print("I2C and Serial initialization complete.\n");
 
+    I2C_scan();
+
     // Thermopile Initialization
     Wire.beginTransmission(0x00); // TX buffer.
     Wire.write(0x04);             // Add register address to TX buffer.
@@ -98,11 +55,170 @@ void setup()
 
     Serial.print("Thermopile init command sent.\n"); // Note that we havent actually checked if its working.
 
+    // Sensors Initialization
+    thermo = new TMP117(1, false);
+    delay(100);
+    if(!thermo->isConnected())
+        Serial.println("TMP117 init failure.");
+    else
+        Serial.println("TMP117 init success.");
+
+    accel = new MPU6000(1, false);
+    accel->begin();
+    delay(100);
+    accel->initialize();
+    delay(100);
+    accel->setAccelRange(MPU6000_RANGE_4_G);
+    if(accel->isConnected())
+        Serial.println("MPU6000 init failure.");
+    else
+        Serial.println("MPU6000 init success.");
+
+    magne = new MLX90393(1, false);
+    magne->begin_I2C();
+    delay(100);
+    magne->setGain(MLX90393_GAIN_2_5X);
+    magne->setResolution(MLX90393_X, MLX90393_RES_19);
+    magne->setResolution(MLX90393_Y, MLX90393_RES_19);
+    magne->setResolution(MLX90393_Z, MLX90393_RES_16);
+    magne->setOversampling(MLX90393_OSR_2);
+    magne->setFilter(MLX90393_FILTER_6);
+    if(!magne->isConnected())
+        Serial.println("MLX90393 init failure.");
+    else
+        Serial.println("MLX90393 init success.");
+
+    cap = new CAP(2, false);
+    delay(100);
+    cap->begin();
+    delay(100);
+    if(!cap->isConnected())
+        Serial.println("CAP init failure.");
+    else
+        Serial.println("CAP init success.");
+
+    pile = new TPIS1385(1);
+    delay(100);
+    pile->begin();
+    pile->readEEprom();
+    if(!pile->isConnected())
+        Serial.println("TPIS1385 init failure.");
+    else
+        Serial.println("TPIS1385 init success.");
+
+    // Radio Initialization
+    radio = new LunaRadio();
+    //Initialize the radio settings by using the initialize_radio function
+	// Argument 1: Set frequency to 915
+	// Argument 2: Set output power to 17
+	// Argument 3: Set Bandwidth to 250
+	// Argument 4: Set spreading factor to 12
+	// Argument 5: Set coding rate to 8
+	radio->initialize_radio(915.0, 17, 250.0, 12, 8);
+
     // No idea what is on this pin, assuming an LED maybe.
     pinMode(A3, OUTPUT);
     digitalWrite(A3, HIGH);
+
+    // These two are LEDs.
+    pinMode(PIN_LED_1, OUTPUT);
+    pinMode(PIN_LED_2, OUTPUT);
+
 }
 
+unsigned long loop_count = 0;
+unsigned long delta_time = 0;
+sensor_float_vec_t accel_data = {0};
+mlx_sample_t magne_data = {0};
+TPsample_t pile_data = {0};
+bool transmit = false;
+char tx_msg[MAX_TX_SIZE] = {0};
+float voltage = 0;
+float temp_c = 0;
+float cap_data = 0;
+
+// Standard Arduino run-time function.
 void loop()
 {
+    // Records loop epoch.
+    delta_time = millis();
+
+    // Check for received radio data.
+    String rx_msg = radio->receive_data_string();
+    String rx_msg_id = rx_msg.substring(0, 2);
+    String rx_msg_content = rx_msg.substring(3);
+
+    // Ignore transmissions that do not apply to us.
+    if (rx_msg && rx_msg_id == SAT_ID)
+    {
+        digitalWrite(PIN_LED_2, HIGH);
+        Serial.print("(RSSI ");
+        Serial.print(radio->getRSSI());
+        Serial.print("): ");
+        Serial.println(rx_msg_content);
+        digitalWrite(PIN_LED_2, LOW);
+    }
+
+    // Prints out current solar panel voltage.
+    Serial.print("Panel V: ");
+    voltage = AN_TO_V(analogRead(PIN_SOLAR_V));
+    Serial.println(voltage, 2);
+
+    // Prints temperature.
+    Serial.print("Temp ('C): ");
+    temp_c = thermo->getTemperatureC();
+    Serial.println(temp_c); // BIG NOTE: getTemperatureF just calls getTemperatureC and converts.
+
+    // Prints accelerometer data.
+    accel_data = accel->getSample();
+    Serial.print("Accel XYZ (Gs): ");
+    Serial.print(accel_data.x, 2);
+    Serial.print(" ");
+    Serial.print(accel_data.y, 2);
+    Serial.print(" ");
+    Serial.println(accel_data.z, 2);
+
+    // Prints magnetometer data.
+    magne_data = magne->getSample();
+    Serial.print("Mag XYZ (uT): ");
+    Serial.print(magne_data.magnetic.x, 2);
+    Serial.print(" ");
+    Serial.print(magne_data.magnetic.y, 2);
+    Serial.print(" ");
+    Serial.println(magne_data.magnetic.z, 2);
+    Serial.print("Mag strength (uT): ");
+    Serial.println(magne_data.strength, 2);
+
+    // Prints raw CAP data.
+    Serial.print("CAP: ");
+    cap_data = cap->getRawData();
+    Serial.println(cap_data);
+
+    // Prints thermopile data.
+    pile_data = pile->getSample();
+    Serial.print("Pile Obj Temp ('C): ");
+    Serial.println(pile_data.object);
+    Serial.print("Pile Amb Temp ('C): ");
+    Serial.println(pile_data.ambient);
+
+    // The next two lines are only for testing purposes.
+    if (!(loop_count % 1000))
+        transmit = true;
+
+    if (transmit)
+    {
+        digitalWrite(PIN_LED_1, HIGH);
+        memset(tx_msg, 0x0, MAX_TX_SIZE);
+        
+        radio->transmit_data("This is a test transmission.");
+
+        transmit = false;
+        digitalWrite(PIN_LED_1, LOW);
+    }
+
+    loop_count++;
+
+    // Calculates time since loop epoch.
+    delta_time = millis() - delta_time;
+    delay(CADENCE - delta_time); // Ensures loop is run once per cadence.
 }
