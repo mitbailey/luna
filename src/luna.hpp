@@ -20,9 +20,11 @@
 #define NUM_I2C_DEV 4
 #define AN_TO_V(An) An * (3.3 / 1023.f)
 #define CADENCE 500 // loop cadence in milliseconds
-#define MAX_TX_SIZE 256 // bytes
+#define MAX_PACKET_SIZE 256 // bytes
 // TODO: Update SAT_ID to our team number when one is issued.
-#define SAT_ID "42"
+#define SAT_ID "42" // EXAMPLE
+#define SAT_ID_B1 0x34 // ASCII 4 in binary EXAMPLE
+#define SAT_ID_B2 0x32 // ASCII 2 in binary EXAMPLE
 
 
 // I2C Information
