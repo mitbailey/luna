@@ -114,21 +114,40 @@
 #define TPIS1385_I2C_ADDR 0x0D
 
 /// FUNCTION-LIKE MACROS ///
+#define WRITE_BLANK(sensor_addr, reg_addr) \
+    Wire.beginTransmission(sensor_addr); \
+    Wire.write(reg_addr); \
+    Wire.endTransmission();
+
 #define WRITE_BYTE(sensor_addr, reg_addr, data) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.write(data); \
     Wire.endTransmission();
+
+#define WRITE_BYTES(sensor_addr, reg_addr, data, nbytes) \
+    Wire.beginTransmission(sensor_addr); \
+    Wire.write(reg_addr); \
+    Wire.write(data, nbytes); \
+    Wire.endTransmission();
+
 #define READ_BYTE(sensor_addr, reg_addr, data) \ 
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.endTransmission(); \
     Wire.requestFrom(sensor_addr, 0x1); \
     data[0] = Wire.read();
+
 #define READ_BYTES(sensor_addr, reg_addr, data, nbytes) \ 
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.endTransmission(); \
+    Wire.requestFrom(sensor_addr, nbytes); \
+    for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
+        data[i] = Wire.read();
+
+// No transmission before request.
+#define READ_BYTES_PASSIVE(sensor_addr, data, nbytes) \
     Wire.requestFrom(sensor_addr, nbytes); \
     for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
         data[i] = Wire.read();
@@ -152,9 +171,82 @@ void setup()
     // MLX90393 initialization and setup.  
     {
         // magnetometer.begin_I2C(); // Pointless
-#define READ_REGISTER16()
-        magnetometer.setGain(MLX90393_GAIN_2_5X);  
+        // magnetometer.setGain(MLX90393_GAIN_2_5X);
+        {
+            uint8_t data[3] = {0}; // [0] is High byte, [1] is Low byte. (HHHH HHHH LLLL LLLL)
+
+            data[0] = (MLX90393_CONF1 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+            
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 2); // Actually grab the two bytes.
+            delay(15); // Wait 15ms after transactions as per the datasheet.
+
+            // uint16_t data16 = ((uint16_t)data[0] << 8 | data[1]);
+            // Mask off gain bits.
+            // data16 &= ~0x0070;
+            // data16 &= 0b10001111;
+            data[0] &= 0b1000;
+            // data[1] &= 0b1111;
+            
+            // Set gain bits.
+            // data16 |= (0x07 << MLX90393_GAIN_SHIFT);
+            // data16 |= (0b01110000);
+            data[0] |= 0b0111;
+            // data[1] |= 0b0000;
+
+            data[2] = (MLX90393_CONF1 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x2);
+            delay(15);
+            // Read status byte.
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 0x2);
+        }
+
         magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
+        {
+            // uint16_t data;
+            uint8_t data[3] = {0};
+            // readRegister(MLX90393_CONF3, &data);
+            data[0] = (MLX90393_CONF3 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // switch (axis) {
+            // case MLX90393_X:
+                // _res_x = resolution;
+                // data &= ~0x0060;
+                // data &= 0b10011111;
+                data[0] &= 0b1001;
+                // data[1] &= 0b1111;
+                // data |= resolution << 5;
+                // data |= MLX90393_RES_19 << 5;
+                data[0] |= 0b0110;
+                // break;
+            // case MLX90393_Y:
+            //     _res_y = resolution;
+            //     data &= ~0x0180;
+            //     data |= resolution << 7;
+            //     break;
+            // case MLX90393_Z:
+            //     _res_z = resolution;
+            //     data &= ~0x0600;
+            //     data |= resolution << 9;
+            //     break;
+            // }
+
+            // return writeRegister(MLX90393_CONF3, data);
+            data[2] = (MLX90393_CONF3 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
+
         magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
         magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
         magnetometer.setOversampling(MLX90393_OSR_2);
@@ -240,9 +332,9 @@ void setup()
 void loop()
 {
     // CAP read.
-    int CAP_data = analogRead(PIN_CAP);
-    mlx_sample_t mlx_data = magnetometer.getSample();
-    sensor_float_vec_t acc_data = accelerometer.getSample();
-    float temp_data = thermometer.getTemperatureC();
-    TPsample_t temperatures = thermopile.getSample();
+    // int CAP_data = analogRead(PIN_CAP);
+    // mlx_sample_t mlx_data = magnetometer.getSample();
+    // sensor_float_vec_t acc_data = accelerometer.getSample();
+    // float temp_data = thermometer.getTemperatureC();
+    // TPsample_t temperatures = thermopile.getSample();
 }
