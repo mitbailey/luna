@@ -500,6 +500,7 @@ void loop()
     // CAP read.
     int CAP_data = analogRead(PIN_CAP);
 
+    // TODO: Convert the following reads to manual.
     // MLX read.
     // mlx_sample_t mlx_data = magnetometer.getSample();
     
