@@ -11,16 +11,16 @@
 
 #include <Wire.h>
 
-#include <GLEE_Sensor.h>
-#include <TMP117.h>
-#include <MPU6000.h>
-#include <MLX90393.h>
-#include <CAP.h>
-#include <TPIS1385.h>
-// #include <GLEE_Radio.h>
-#include "GLEE_Radio_v2.h"
+// #include <GLEE_Sensor.h>
+// #include <TMP117.h>
+// #include <MPU6000.h>
+// #include <MLX90393.h>
+// #include <CAP.h>
+// #include <TPIS1385.h>
+// // #include <GLEE_Radio.h>
+// #include "GLEE_Radio_v2.h"
 
-#include "luna.hpp"
+// #include "luna.hpp"
 
 // #define DEBUG_PRINTS
 
@@ -32,19 +32,54 @@
 #define ADDR_TPIS1385 0x00 // UNKNOWN
 #define PIN_CAP A0 // Hardcoded analog pin on LunaSat.
 
-#define MLX90393_AXIS_ALL (0x0E)      /**< X+Y+Z axis bits for commands. */
-#define MLX90393_CONF1 (0x00)         /**< Gain */
-#define MLX90393_CONF2 (0x01)         /**< Burst, comm mode */
-#define MLX90393_CONF3 (0x02)         /**< Oversampling, filter, res. */
-#define MLX90393_CONF4 (0x03)         /**< Sensitivty drift. */
-#define MLX90393_GAIN_SHIFT (0x04)       /**< Left-shift for gain bits. */
-#define MLX90393_HALL_CONF (0x0C)     /**< Hall plate spinning rate adj. */
-#define MLX90393_STATUS_OK (0x00)     /**< OK value for status response. */
-#define MLX90393_STATUS_SMMODE (0x08) /**< SM Mode status response. */
-#define MLX90393_STATUS_RESET (0x01)  /**< Reset value for status response. */
-#define MLX90393_STATUS_ERROR (0xFF)  /**< OK value for status response. */
-#define MLX90393_STATUS_MASK (0xFC)   /**< Mask for status OK checks. */
+/// MLX
+#define MLX90393_AXIS_ALL 0x0E      /**< X+Y+Z axis bits for commands. */
+#define MLX90393_CONF1 0x00         /**< Gain */
+#define MLX90393_CONF2 0x01         /**< Burst, comm mode */
+#define MLX90393_CONF3 0x02         /**< Oversampling, filter, res. */
+#define MLX90393_CONF4 0x03         /**< Sensitivty drift. */
+#define MLX90393_GAIN_SHIFT 0x04       /**< Left-shift for gain bits. */
+#define MLX90393_HALL_CONF 0x0C     /**< Hall plate spinning rate adj. */
+#define MLX90393_STATUS_OK 0x00     /**< OK value for status response. */
+#define MLX90393_STATUS_SMMODE 0x08 /**< SM Mode status response. */
+#define MLX90393_STATUS_RESET 0x01  /**< Reset value for status response. */
+#define MLX90393_STATUS_ERROR 0xFF  /**< OK value for status response. */
+#define MLX90393_STATUS_MASK 0xFC   /**< Mask for status OK checks. */
 
+/** Register map. */
+#define MLX90393_REG_SB 0x10  /**< Start burst mode. */
+#define MLX90393_REG_SW 0x20  /**< Start wakeup on change mode. */
+#define MLX90393_REG_SM 0x30  /**> Start single-meas mode. */
+#define MLX90393_REG_RM 0x40  /**> Read measurement. */
+#define MLX90393_REG_RR 0x50  /**< Read register. */
+#define MLX90393_REG_WR 0x60  /**< Write register. */
+#define MLX90393_REG_EX 0x80  /**> Exit moode. */
+#define MLX90393_REG_HR 0xD0  /**< Memory recall. */
+#define MLX90393_REG_HS 0x70  /**< Memory store. */
+#define MLX90393_REG_RT 0xF0  /**< Reset. */
+#define MLX90393_REG_NOP 0x00 /**< NOP. */
+
+/** Gain settings for CONF1 register. (Modified) */
+#define MLX90393_GAIN_2_5X 0x00
+#define MLX90393_GAIN_1X 0x01
+
+/** Resolution settings for CONF3 register. */
+#define MLX90393_RES_16 0x0
+#define MLX90393_RES_17 0x1
+#define MLX90393_RES_18 0x2
+#define MLX90393_RES_19 0x3
+
+/** Digital filter settings for CONF3 register (Modified) */
+#define MLX90393_FILTER_6 0x0
+#define MLX90393_FILTER_7 0x1
+
+/** Oversampling settings for CONF3 register. */
+#define MLX90393_OSR_0 0x0
+#define MLX90393_OSR_1 0x1
+#define MLX90393_OSR_2 0x2
+#define MLX90393_OSR_3 0x3
+
+/// MPU
 #define MPU6000_I2CADDR_DEFAULT 0x69    // MPU6000 default i2c address w/ AD0 high
 #define MPU6000_DEVICE_ID 0x68          // The correct MPU6000_WHO_AM_I value
 #define MPU6000_SELF_TEST_X 0x0D        // Self test factory calibrated values register
@@ -70,6 +105,16 @@
 #define MPU6000_CONFIG_FS_SEL_LEN 2
 #define MPU_ONE_G 9.80665
 
+// From Adafruit Lib
+#define MPU6000_BAND_260_HZ 0x0 //< Docs imply this disables the filter
+#define MPU6000_BAND_184_HZ 0x1 //< 184 Hz
+#define MPU6000_BAND_94_HZ 0x2  //< 94 Hz
+#define MPU6000_BAND_44_HZ 0x3  //< 44 Hz
+#define MPU6000_BAND_21_HZ 0x4  //< 21 Hz
+#define MPU6000_BAND_10_HZ 0x5  //< 10 Hz
+#define MPU6000_BAND_5_HZ 0x6   //< 5 Hz
+
+/// TMP
 #define TMP117_TEMP_REG 0X00
 #define TMP117_CONFIG_REG 0x01
 #define TMP117_HIGH_LIMIT_REG 0X02
@@ -81,6 +126,7 @@
 #define TMP117_EEPROM3_REG 0X08
 #define TMP117_DEVICE_ID 0X0F
 
+/// TP
 #define TP_OBJECT 1                             // Object Temperature reg                         (3xBytes) 17bit value [read] 
 #define TP_AMBIENT 3                            // Ambient Temp Reg                               (2xBytes) 15bit value [read]
 #define TP_OBJECT_LP1 5                         // Low Pass filter of object signal value 1 reg   (3xBytes) 20bit value [read] comparison: 8
@@ -114,31 +160,36 @@
 #define TPIS1385_I2C_ADDR 0x0D
 
 /// FUNCTION-LIKE MACROS ///
+// Writes sensor and register addresses.
 #define WRITE_BLANK(sensor_addr, reg_addr) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.endTransmission();
 
+// Writes sensor and register addresses, and one data byte.
 #define WRITE_BYTE(sensor_addr, reg_addr, data) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.write(data); \
     Wire.endTransmission();
 
+// Writes sensor and register addresses, and n data bytes.
 #define WRITE_BYTES(sensor_addr, reg_addr, data, nbytes) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.write(data, nbytes); \
     Wire.endTransmission();
 
-#define READ_BYTE(sensor_addr, reg_addr, data) \ 
+// Writes sensor and register addresses, and requests one byte.
+#define READ_BYTE(sensor_addr, reg_addr, data) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.endTransmission(); \
     Wire.requestFrom(sensor_addr, 0x1); \
     data[0] = Wire.read();
 
-#define READ_BYTES(sensor_addr, reg_addr, data, nbytes) \ 
+// Writes sensor and register addresses, and requests n bytes.
+#define READ_BYTES(sensor_addr, reg_addr, data, nbytes) \
     Wire.beginTransmission(sensor_addr); \
     Wire.write(reg_addr); \
     Wire.endTransmission(); \
@@ -146,15 +197,15 @@
     for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
         data[i] = Wire.read();
 
-// No transmission before request.
+// Requests n bytes.
 #define READ_BYTES_PASSIVE(sensor_addr, data, nbytes) \
     Wire.requestFrom(sensor_addr, nbytes); \
     for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
         data[i] = Wire.read();
 
 // TEMP
-MLX90393 magnetometer = MLX90393(1,false);
-MPU6000 accelerometer(1, false); // Sets sensor ID to 1 and debugging to false
+// MLX90393 magnetometer = MLX90393(1,false);
+// MPU6000 accelerometer(1, false); // Sets sensor ID to 1 and debugging to false
 // TMP117 thermometer(1,false);
 // TPIS1385 thermopile(1);
 
@@ -162,6 +213,9 @@ MPU6000 accelerometer(1, false); // Sets sensor ID to 1 and debugging to false
 float TPIS_cal_K = 0.f; // TPIS calibration constant.
 void setup()
 {
+    // NOTE: Setup sequences taken from the basic setup examples found in: 
+    //       github.com/GLEE2023/GLEE2023/examples/Sensor_Examples
+
     Wire.begin();
     Wire.setClock(100000);
     
@@ -186,14 +240,16 @@ void setup()
             // Mask off gain bits.
             // data16 &= ~0x0070;
             // data16 &= 0b10001111;
-            data[0] &= 0b1000;
-            // data[1] &= 0b1111;
+
+            // [0] is High byte, [1] is Low byte.
+            // data[0] &= 0b11111111;
+            data[1] &= 0b10001111;
             
             // Set gain bits.
             // data16 |= (0x07 << MLX90393_GAIN_SHIFT);
             // data16 |= (0b01110000);
-            data[0] |= 0b0111;
-            // data[1] |= 0b0000;
+            // data[0] |= 0b00000000;
+            data[1] |= 0b01110000;
 
             data[2] = (MLX90393_CONF1 << 0x2);
             WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x2);
@@ -203,7 +259,7 @@ void setup()
             READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 0x2);
         }
 
-        magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
+        // magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
         {
             // uint16_t data;
             uint8_t data[3] = {0};
@@ -215,30 +271,40 @@ void setup()
             READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
-            // switch (axis) {
-            // case MLX90393_X:
-                // _res_x = resolution;
-                // data &= ~0x0060;
-                // data &= 0b10011111;
-                data[0] &= 0b1001;
-                // data[1] &= 0b1111;
-                // data |= resolution << 5;
-                // data |= MLX90393_RES_19 << 5;
-                data[0] |= 0b0110;
-                // break;
-            // case MLX90393_Y:
-            //     _res_y = resolution;
-            //     data &= ~0x0180;
-            //     data |= resolution << 7;
-            //     break;
-            // case MLX90393_Z:
-            //     _res_z = resolution;
-            //     data &= ~0x0600;
-            //     data |= resolution << 9;
-            //     break;
-            // }
+            // [0] is High byte, [1] is Low byte.
+            // data[0] &= 0b11111111;
+            data[1] &= 0b10011111;
 
-            // return writeRegister(MLX90393_CONF3, data);
+            // data[0] |= (MLX90393_RES_19 << 5) >> 8;
+            data[1] |= MLX90393_RES_19 << 5;
+
+            data[2] = (MLX90393_CONF3 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            // Read status byte.
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
+
+        // magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
+        {
+            uint8_t data[3] = {0};
+
+            data[0] = (MLX90393_CONF3 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // [0] is High byte, [1] is Low byte.
+            data[0] &= 0b11111110;
+            data[1] &= 0b01111111;
+
+            // data[0] |= (MLX90393_RES_19 << 7) >> 8;
+            data[1] |= MLX90393_RES_19 << 7;
+
             data[2] = (MLX90393_CONF3 << 2);
             WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
@@ -247,11 +313,111 @@ void setup()
             READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
         }
 
-        magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
-        magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
-        magnetometer.setOversampling(MLX90393_OSR_2);
-        magnetometer.setFilter(MLX90393_FILTER_6);
-        magnetometer.setTrigInt(false);
+        // magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
+        {
+            uint8_t data[3] = {0};
+
+            data[0] = (MLX90393_CONF3 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // [0] is High byte, [1] is Low byte.
+            data[0] &= 0b11111001;
+            // data[1] &= 0b11111111;
+
+            // data[0] |= (MLX90393_RES_19 << 9) >> 8; aka:
+            data[0] |= (MLX90393_RES_19 << 1);
+            data[1] |= MLX90393_RES_19 << 9;
+
+            data[2] = (MLX90393_CONF3 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
+
+        // magnetometer.setOversampling(MLX90393_OSR_2);
+        {
+            uint8_t data[3] = {0};
+
+            data[0] = (MLX90393_CONF3 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // [0] is High byte, [1] is Low byte.
+            // data[0] &= 0b11111111;
+            data[1] &= 0b11111100;
+
+            // data[0] |= MLX90393_OSR_2;
+            data[1] |= MLX90393_OSR_2;
+
+            data[2] = (MLX90393_CONF3 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
+
+        // magnetometer.setFilter(MLX90393_FILTER_6);
+        {
+            uint8_t data[3] = {0};
+
+            data[0] = (MLX90393_CONF3 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // [0] is High byte, [1] is Low byte.
+            // data[0] &= 0b11111111;
+            data[1] &= 0b11100011;
+
+            // data[0] |= ((MLX90393_FILTER_6 + 0x6) << 2);
+            data[1] |= ((MLX90393_FILTER_6 + 0x6) << 2);
+
+            data[2] = (MLX90393_CONF3 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
+
+        // magnetometer.setTrigInt(false);
+        {
+            uint8_t data[3] = {0};
+
+            data[0] = (MLX90393_CONF2 << 0x2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF2.
+            memset(data, 0x0, sizeof(data));
+
+            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            delay(15);
+
+            // [0] is High byte, [1] is Low byte.
+            data[0] &= 0b01111111;
+            // data[1] &= 0b11111111;
+
+            // ONLY IF setTrigInt(true)
+            // data[0] |= 0b10000000;
+            // data[1] |= 0b00000000; // Never uncomment, just here for clarity.
+
+            data[2] = (MLX90393_CONF2 << 2);
+            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            delay(15);
+
+            uint8_t status_buffer[2] = {0};
+            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+        }
     }
 
     // MPU6000 initialization and setup.
@@ -291,8 +457,8 @@ void setup()
         Wire.beginTransmission(0x00); // Reload all call   
         Wire.write(0x04);
         Wire.write(0x00);         
-        if(Wire.endTransmission() != 0) 
-            Serial.println(F("Init call failiure"));
+        // if(Wire.endTransmission() != 0) 
+        //     Serial.println(F("Init call failiure"));
         delay(50);  // Wait on i2c transmission
         
         // thermopile.readEEprom(); // Prints eeprom and updates calibration constants
@@ -326,15 +492,23 @@ void setup()
     }
 
     // SX1272 initialization and setup.
-    // TODO: 
+    // TODO: Manual initialization for the radio transceiver system.
 }
 
 void loop()
 {
     // CAP read.
-    // int CAP_data = analogRead(PIN_CAP);
+    int CAP_data = analogRead(PIN_CAP);
+
+    // MLX read.
     // mlx_sample_t mlx_data = magnetometer.getSample();
+    
+    // Accel read.
     // sensor_float_vec_t acc_data = accelerometer.getSample();
+    
+    // Thermo read.
     // float temp_data = thermometer.getTemperatureC();
+    
+    // TPile read.
     // TPsample_t temperatures = thermopile.getSample();
 }
