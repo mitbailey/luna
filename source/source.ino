@@ -26,7 +26,8 @@
 
 /// SENSOR-SPECIFIC CONSTANTS
 #define ADDR_MLX90393 0x0C
-#define ADDR_MPU6000 0x00 // UNKOWN
+#define ADDR_MPU6000 0x68
+#define ADDR_MPU6000_2 0x69
 #define ADDR_SX1272 0x00 // UNKNOWN
 #define ADDR_TMP117 0x00 // UNKNOWN
 #define ADDR_TPIS1385 0x00 // UNKNOWN
@@ -211,6 +212,7 @@
 
 // Actually important global variables.
 float TPIS_cal_K = 0.f; // TPIS calibration constant.
+uint16_t MPU6000_accel_scale = 0;
 void setup()
 {
     // NOTE: Setup sequences taken from the basic setup examples found in: 
@@ -439,13 +441,17 @@ void setup()
         WRITE_BYTE(ADDR_MPU6000, MPU6000_SMPLRT_DIV, 0x0);
         // Set filter bandwidth.
         WRITE_BYTE(ADDR_MPU6000, MPU6000_CONFIG, MPU6000_BAND_260_HZ);
+#define MPU6000_RANGE_2_G 0x0
+#define MPU6000_RANGE_4_G 0x8
+#define MPU6000_RANGE_8_G 0x10
+#define MPU6000_RANGE_16_G 0x18
         // Set acceleration range to 2 Gs.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_ACCEL_CONFIG, 0x0);
+        WRITE_BYTE(ADDR_MPU6000, MPU6000_ACCEL_CONFIG, MPU6000_RANGE_2_G); // 0x0 = 2G; 0x8 = 4G; 0x10 = 8G; 0x18 = 16G
+        MPU6000_accel_scale = 16384; // 16384 = 2G; 8192 = 4G; 4096 = 8G; 2048 = 16G
         // IDK what this does but its in the initializer.
         WRITE_BYTE(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0x1);
         // accelerometer.setAccelRange(MPU6000_RANGE_2_G); // Redundant, already called in the initializer.
     }
-
 
     // TMP117 initialization and setup.
     // None required.
