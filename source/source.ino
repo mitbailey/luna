@@ -1,5 +1,5 @@
 /**
- * @file main.ino
+ * @file source.ino
  * @author Mit Bailey (mitbailey99@gmail.com)
  * @brief
  * @version See Git tags for version information.
@@ -11,6 +11,10 @@
 
 #include <Wire.h>
 
+// #define SERIAL_DEBUG_PRINT_ENABLE // Allows sdbprintlf(...) & sdbprintf(...) printouts if defined.
+
+#include "meb_print_serial.h"
+
 // #include <GLEE_Sensor.h>
 // #include <TMP117.h>
 // #include <MPU6000.h>
@@ -21,8 +25,6 @@
 // #include "GLEE_Radio_v2.h"
 
 // #include "luna.hpp"
-
-// #define DEBUG_PRINTS
 
 /// SENSOR-SPECIFIC CONSTANTS
 #define ADDR_MLX90393 0x0C
@@ -115,6 +117,11 @@
 #define MPU6000_BAND_10_HZ 0x5  //< 10 Hz
 #define MPU6000_BAND_5_HZ 0x6   //< 5 Hz
 
+#define MPU6000_RANGE_2_G 0x0
+// #define MPU6000_RANGE_4_G 0x8
+// #define MPU6000_RANGE_8_G 0x10
+// #define MPU6000_RANGE_16_G 0x18
+
 /// TMP
 #define TMP117_TEMP_REG 0X00
 #define TMP117_CONFIG_REG 0x01
@@ -126,6 +133,7 @@
 #define TMP117_TEMP_OFFSET_REG 0X07
 #define TMP117_EEPROM3_REG 0X08
 #define TMP117_DEVICE_ID 0X0F
+#define TMP117_RESOLUTION 0.0078125
 
 /// TP
 #define TP_OBJECT 1                             // Object Temperature reg                         (3xBytes) 17bit value [read] 
@@ -160,49 +168,99 @@
 #define TP_I2C_ADDR 63  
 #define TPIS1385_I2C_ADDR 0x0D
 
-/// FUNCTION-LIKE MACROS ///
-// Writes sensor and register addresses.
-#define WRITE_BLANK(sensor_addr, reg_addr) \
-    Wire.beginTransmission(sensor_addr); \
-    Wire.write(reg_addr); \
+/**
+ * @brief Writes slave device and register addresses.
+ * 
+ * First writes to I2C bus the address of a slave device, then a register address.
+ * 
+ * @param sensor_addr The address of the slave device.
+ * @param reg_addr The address of the register.
+ * @return uint8_t I2C bus status.
+ */
+static inline uint8_t i2c_write_blank(uint8_t slave_addr, uint8_t reg_addr)
+{
+    Wire.beginTransmission(slave_addr);
+    Wire.write(reg_addr);
+    return Wire.endTransmission();
+}
+
+/**
+ * @brief Writes slave device and register addresses, and one data byte.
+ * 
+ * First writes to I2C bus the address of a slave device, then a register address, followed by one byte of data.
+ * 
+ * @param slave_addr The address of the slave device.
+ * @param reg_addr The address of the register.
+ * @param data Value to be written.
+ * @return uint8_t I2C bus status. 
+ */
+static inline uint8_t i2c_write_byte(uint8_t slave_addr, uint8_t reg_addr, uint8_t data)
+{
+    Wire.beginTransmission(slave_addr);
+    Wire.write(reg_addr);
+    Wire.write(data);
+    return Wire.endTransmission();
+}
+
+/**
+ * @brief Writes slave device and register addresses, and some number of data bytes.
+ * 
+ * First writes to I2C bus the address of a slave device, then a register address, followed by nbytes of data.
+ * 
+ * @param slave_addr The address of the slave device.
+ * @param reg_addr The address of the register.
+ * @param data Pointer to the beginning of nbytes of data.
+ * @param nbytes Number of bytes to send of data.
+ * @return uint8_t I2C bus status. 
+ */
+static inline uint8_t i2c_write_bytes(uint8_t slave_addr, uint8_t reg_addr, uint8_t *data, uint8_t nbytes = 1)
+{
+    Wire.beginTransmission(slave_addr);
+    Wire.write(reg_addr);
+    Wire.write(data, nbytes);
+    return Wire.endTransmission();
+}
+
+/**
+ * @brief Writes slave device and register addresses, and then requests nbytes of data.
+ * 
+ * First writes to I2C bus the address of a slave device, then a register address. It then requests n-bytes of data, and
+ * reads data until either there are no more bytes to read or nbytes of data are read, whichever occurs first. 
+ * 
+ * @param slave_addr The address of the slave device.
+ * @param reg_addr The address of the register.
+ * @param data Pointer to the beginning of nbytes of memory for data storage.
+ * @param nbytes Maximum number of bytes to be received.
+ * @return uint8_t Bytes read from I2C.
+ */
+static inline uint8_t i2c_read_bytes(uint8_t slave_addr, uint8_t reg_addr, uint8_t *data, uint8_t nbytes = 1)
+{
+    Wire.beginTransmission(slave_addr);
+    Wire.write(reg_addr);
     Wire.endTransmission();
-
-// Writes sensor and register addresses, and one data byte.
-#define WRITE_BYTE(sensor_addr, reg_addr, data) \
-    Wire.beginTransmission(sensor_addr); \
-    Wire.write(reg_addr); \
-    Wire.write(data); \
-    Wire.endTransmission();
-
-// Writes sensor and register addresses, and n data bytes.
-#define WRITE_BYTES(sensor_addr, reg_addr, data, nbytes) \
-    Wire.beginTransmission(sensor_addr); \
-    Wire.write(reg_addr); \
-    Wire.write(data, nbytes); \
-    Wire.endTransmission();
-
-// Writes sensor and register addresses, and requests one byte.
-#define READ_BYTE(sensor_addr, reg_addr, data) \
-    Wire.beginTransmission(sensor_addr); \
-    Wire.write(reg_addr); \
-    Wire.endTransmission(); \
-    Wire.requestFrom(sensor_addr, 0x1); \
-    data[0] = Wire.read();
-
-// Writes sensor and register addresses, and requests n bytes.
-#define READ_BYTES(sensor_addr, reg_addr, data, nbytes) \
-    Wire.beginTransmission(sensor_addr); \
-    Wire.write(reg_addr); \
-    Wire.endTransmission(); \
-    Wire.requestFrom(sensor_addr, nbytes); \
-    for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
+    Wire.requestFrom(slave_addr, nbytes);
+    uint16_t i = 0;
+    for (; Wire.available() && i < UINT16_MAX; i++)
         data[i] = Wire.read();
+    return i;
+}
 
-// Requests n bytes.
-#define READ_BYTES_PASSIVE(sensor_addr, data, nbytes) \
-    Wire.requestFrom(sensor_addr, nbytes); \
-    for (uint16_t i = 0; Wire.available() && i < UINT16_MAX; i++) \
+/**
+ * @brief Requests nbytes of data without first writing anything to the I2C bus.
+ * 
+ * @param slave_addr The address of the slave device.
+ * @param data Pointer to the beginning of nbytes of memory for data storage.
+ * @param nbytes Maximum number of bytes to be received.
+ * @return uint8_t 
+ */
+static inline uint8_t i2c_read_bytes_passive(uint8_t slave_addr, uint8_t *data, uint8_t nbytes = 1)
+{
+    Wire.requestFrom(slave_addr, nbytes);
+    uint16_t i = 0;
+    for (; Wire.available() && i < UINT16_MAX; i++)
         data[i] = Wire.read();
+    return i;
+}
 
 // TEMP
 // MLX90393 magnetometer = MLX90393(1,false);
@@ -218,6 +276,10 @@ void setup()
     // NOTE: Setup sequences taken from the basic setup examples found in: 
     //       github.com/GLEE2023/GLEE2023/examples/Sensor_Examples
 
+#ifdef SERIAL_DEBUG_PRINT_ENABLE
+    Serial.begin(9600);
+#endif // SERIAL_DEBUG_PRINT_ENABLE
+
     Wire.begin();
     Wire.setClock(100000);
     
@@ -227,22 +289,22 @@ void setup()
     // MLX90393 initialization and setup.  
     {
         // magnetometer.begin_I2C(); // Pointless
-        // magnetometer.setGain(MLX90393_GAIN_2_5X);
+        // inplaceof: magnetometer.setGain(MLX90393_GAIN_2_5X);
         {
             uint8_t data[3] = {0}; // [0] is High byte, [1] is Low byte. (HHHH HHHH LLLL LLLL)
 
             data[0] = (MLX90393_CONF1 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
             
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 2); // Actually grab the two bytes.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 2); // Actually grab the two bytes.
             delay(15); // Wait 15ms after transactions as per the datasheet.
 
             // uint16_t data16 = ((uint16_t)data[0] << 8 | data[1]);
-            // Mask off gain bits.
             // data16 &= ~0x0070;
             // data16 &= 0b10001111;
 
+            // Mask off gain bits.
             // [0] is High byte, [1] is Low byte.
             // data[0] &= 0b11111111;
             data[1] &= 0b10001111;
@@ -254,23 +316,23 @@ void setup()
             data[1] |= 0b01110000;
 
             data[2] = (MLX90393_CONF1 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x2);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x2);
             delay(15);
             // Read status byte.
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 0x2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 0x2);
         }
 
-        // magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
+        // inplaceof: magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
         {
             // uint16_t data;
             uint8_t data[3] = {0};
             // readRegister(MLX90393_CONF3, &data);
             data[0] = (MLX90393_CONF3 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -281,23 +343,23 @@ void setup()
             data[1] |= MLX90393_RES_19 << 5;
 
             data[2] = (MLX90393_CONF3 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             // Read status byte.
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
 
-        // magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
+        // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
         {
             uint8_t data[3] = {0};
 
             data[0] = (MLX90393_CONF3 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -308,22 +370,22 @@ void setup()
             data[1] |= MLX90393_RES_19 << 7;
 
             data[2] = (MLX90393_CONF3 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
 
-        // magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
+        // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
         {
             uint8_t data[3] = {0};
 
             data[0] = (MLX90393_CONF3 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -335,22 +397,22 @@ void setup()
             data[1] |= MLX90393_RES_19 << 9;
 
             data[2] = (MLX90393_CONF3 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
 
-        // magnetometer.setOversampling(MLX90393_OSR_2);
+        // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
         {
             uint8_t data[3] = {0};
 
             data[0] = (MLX90393_CONF3 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -361,22 +423,22 @@ void setup()
             data[1] |= MLX90393_OSR_2;
 
             data[2] = (MLX90393_CONF3 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
 
-        // magnetometer.setFilter(MLX90393_FILTER_6);
+        // inplaceof: magnetometer.setFilter(MLX90393_FILTER_6);
         {
             uint8_t data[3] = {0};
 
             data[0] = (MLX90393_CONF3 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -387,22 +449,22 @@ void setup()
             data[1] |= ((MLX90393_FILTER_6 + 0x6) << 2);
 
             data[2] = (MLX90393_CONF3 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
 
-        // magnetometer.setTrigInt(false);
+        // inplaceof: magnetometer.setTrigInt(false);
         {
             uint8_t data[3] = {0};
 
             data[0] = (MLX90393_CONF2 << 0x2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF2.
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF2.
             memset(data, 0x0, sizeof(data));
 
-            READ_BYTES_PASSIVE(ADDR_MLX90393, data, 0x2); // Reads the data.
+            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
             delay(15);
 
             // [0] is High byte, [1] is Low byte.
@@ -414,42 +476,40 @@ void setup()
             // data[1] |= 0b00000000; // Never uncomment, just here for clarity.
 
             data[2] = (MLX90393_CONF2 << 2);
-            WRITE_BYTES(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
+            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
             delay(15);
 
             uint8_t status_buffer[2] = {0};
-            READ_BYTES_PASSIVE(ADDR_MLX90393, status_buffer, 2);
+            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
     }
 
     // MPU6000 initialization and setup.
     {    
         // accelerometer.begin(); // Pointless
-        // accelerometer.initialize();
-        // Reset all internal registers to defaults.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0b10000000);
-        uint8_t data[1] = {0};
-        do
+        // inplaceof: accelerometer.initialize();
         {
-            READ_BYTE(ADDR_MPU6000, MPU6000_PWR_MGMT_1, data);
-            delay(1);
-        } while (data[0] == 0b10000000);
-        delay(100);
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_SIGNAL_PATH_RESET, 0b00000111);
-        delay(100);
-        // Set sample rate divisor.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_SMPLRT_DIV, 0x0);
-        // Set filter bandwidth.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_CONFIG, MPU6000_BAND_260_HZ);
-#define MPU6000_RANGE_2_G 0x0
-#define MPU6000_RANGE_4_G 0x8
-#define MPU6000_RANGE_8_G 0x10
-#define MPU6000_RANGE_16_G 0x18
-        // Set acceleration range to 2 Gs.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_ACCEL_CONFIG, MPU6000_RANGE_2_G); // 0x0 = 2G; 0x8 = 4G; 0x10 = 8G; 0x18 = 16G
-        MPU6000_accel_scale = 16384; // 16384 = 2G; 8192 = 4G; 4096 = 8G; 2048 = 16G
-        // IDK what this does but its in the initializer.
-        WRITE_BYTE(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0x1);
+            // Reset all internal registers to defaults.
+            i2c_write_byte(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0b10000000);
+            uint8_t data[1] = {0};
+            do
+            {
+                i2c_read_bytes(ADDR_MPU6000, MPU6000_PWR_MGMT_1, data);
+                delay(1);
+            } while (data[0] == 0b10000000);
+            delay(100);
+            i2c_write_byte(ADDR_MPU6000, MPU6000_SIGNAL_PATH_RESET, 0b00000111);
+            delay(100);
+            // Set sample rate divisor.
+            i2c_write_byte(ADDR_MPU6000, MPU6000_SMPLRT_DIV, 0x0);
+            // Set filter bandwidth.
+            i2c_write_byte(ADDR_MPU6000, MPU6000_CONFIG, MPU6000_BAND_260_HZ);
+            // Set acceleration range to 2 Gs.
+            i2c_write_byte(ADDR_MPU6000, MPU6000_ACCEL_CONFIG, MPU6000_RANGE_2_G); // 0x0 = 2G; 0x8 = 4G; 0x10 = 8G; 0x18 = 16G
+            MPU6000_accel_scale = 16384; // 16384 = 2G; 8192 = 4G; 4096 = 8G; 2048 = 16G
+            // IDK what this does but its in the initializer.
+            i2c_write_byte(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0x1);
+        }
         // accelerometer.setAccelRange(MPU6000_RANGE_2_G); // Redundant, already called in the initializer.
     }
 
@@ -458,43 +518,47 @@ void setup()
 
     // TPIS1385 initialization and setup.
     {
-        // thermopile.begin(); // Thermopile start-up
-        Wire.begin(); // Begin i2c coms at standard speed
-        Wire.beginTransmission(0x00); // Reload all call   
-        Wire.write(0x04);
-        Wire.write(0x00);         
-        // if(Wire.endTransmission() != 0) 
-        //     Serial.println(F("Init call failiure"));
-        delay(50);  // Wait on i2c transmission
+        // inplaceof: thermopile.begin(); // Thermopile start-up
+        {
+            Wire.begin(); // Begin i2c coms at standard speed
+            Wire.beginTransmission(0x00); // Reload all call   
+            Wire.write(0x04);
+            Wire.write(0x00);         
+            // if(Wire.endTransmission() != 0) 
+            //     Serial.println(F("Init call failiure"));
+            delay(50);  // Wait on i2c transmission
+        }
         
-        // thermopile.readEEprom(); // Prints eeprom and updates calibration constants
-        uint8_t eeprom_data[2] = {0};
-        // Set EEPROM control to read.
-        WRITE_BYTE(ADDR_TPIS1385, TP_EEPROM_CONTROL, 0x80);
-        // Read EEPROM protocol.
-        READ_BYTE(ADDR_TPIS1385, TP_PROTOCOL, eeprom_data);
-        // Read PTAT25 calibration value.
-        READ_BYTES(ADDR_TPIS1385, TP_PTAT25, eeprom_data, 0x2);
-        uint16_t TPIS_cal_PTAT25 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1]; 
-        // Read M calibration value.
-        READ_BYTES(ADDR_TPIS1385, TP_M, eeprom_data, 0x2);
-        uint16_t TPIS_cal_M = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1]; 
-        TPIS_cal_M /= 100; // Apply appropriate offset
-        // Read U0 calibration value.
-        READ_BYTES(ADDR_TPIS1385, TP_U0, eeprom_data, 0x2);
-        uint16_t TPIS_cal_U0 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1];
-        TPIS_cal_U0 += 32768;
-        // Read Uout1 calibration value.
-        READ_BYTES(ADDR_TPIS1385, TP_UOUT1, eeprom_data, 0x2);
-        uint32_t TPIS_cal_UOut1 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1];
-        TPIS_cal_UOut1 *= 2;
-        // Read TObj1 calibration value.
-        READ_BYTE(ADDR_TPIS1385, TP_T_OBJ_1, eeprom_data);
-        uint8_t TPIS_cal_TObj1 = eeprom_data[0];
-        // Stop reading from EEPROM.
-        WRITE_BYTE(ADDR_TPIS1385, TP_EEPROM_CONTROL, 0x0);
-        // Calculate the calibration constant, K (see: Section 8.4).
-        TPIS_cal_K = ((float) (TPIS_cal_UOut1 - TPIS_cal_U0) / (pow((float) (TPIS_cal_TObj1 + 273.15f), 3.8f) - pow(25.0f + 273.15f,3.8f)));
+        // inplaceof: thermopile.readEEprom(); // Prints eeprom and updates calibration constants
+        {
+            uint8_t eeprom_data[2] = {0};
+            // Set EEPROM control to read.
+            i2c_write_byte(ADDR_TPIS1385, TP_EEPROM_CONTROL, 0x80);
+            // Read EEPROM protocol.
+            i2c_read_bytes(ADDR_TPIS1385, TP_PROTOCOL, eeprom_data);
+            // Read PTAT25 calibration value.
+            i2c_read_bytes(ADDR_TPIS1385, TP_PTAT25, eeprom_data, 0x2);
+            uint16_t TPIS_cal_PTAT25 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1]; 
+            // Read M calibration value.
+            i2c_read_bytes(ADDR_TPIS1385, TP_M, eeprom_data, 0x2);
+            uint16_t TPIS_cal_M = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1]; 
+            TPIS_cal_M /= 100; // Apply appropriate offset
+            // Read U0 calibration value.
+            i2c_read_bytes(ADDR_TPIS1385, TP_U0, eeprom_data, 0x2);
+            uint16_t TPIS_cal_U0 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1];
+            TPIS_cal_U0 += 32768;
+            // Read Uout1 calibration value.
+            i2c_read_bytes(ADDR_TPIS1385, TP_UOUT1, eeprom_data, 0x2);
+            uint32_t TPIS_cal_UOut1 = ((uint16_t) eeprom_data[0] << 8) | eeprom_data[1];
+            TPIS_cal_UOut1 *= 2;
+            // Read TObj1 calibration value.
+            i2c_read_bytes(ADDR_TPIS1385, TP_T_OBJ_1, eeprom_data);
+            uint8_t TPIS_cal_TObj1 = eeprom_data[0];
+            // Stop reading from EEPROM.
+            i2c_write_byte(ADDR_TPIS1385, TP_EEPROM_CONTROL, 0x0);
+            // Calculate the calibration constant, K (see: Section 8.4).
+            TPIS_cal_K = ((float) (TPIS_cal_UOut1 - TPIS_cal_U0) / (pow((float) (TPIS_cal_TObj1 + 273.15f), 3.8f) - pow(25.0f + 273.15f,3.8f)));
+        }
     }
 
     // SX1272 initialization and setup.
@@ -503,19 +567,48 @@ void setup()
 
 void loop()
 {
+    // TODO: Manual radio T/RX.
+
     // CAP read.
     int CAP_data = analogRead(PIN_CAP);
 
-    // TODO: Convert the following reads to manual.
     // MLX read.
-    // mlx_sample_t mlx_data = magnetometer.getSample();
+    // inplaceof: mlx_sample_t mlx_data = magnetometer.getSample();
+    // TODO: Manual MLX90393 magnetometer reading.
     
-    // Accel read.
-    // sensor_float_vec_t acc_data = accelerometer.getSample();
+    // MPU6000 Accel read.
+    // inplaceof: sensor_float_vec_t acc_data = accelerometer.getSample();
+    {
+        uint8_t rd_buf[6] = {0};
+        // Reads the accelerometer data in LSB/g
+        i2c_read_bytes(ADDR_MPU6000, MPU6000_ACCEL_OUT, rd_buf, 0x6);
+        uint16_t acc_xyz[3] = {0};
+        acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
+        acc_xyz[1] = rd_buf[0] << 8 | rd_buf[1];
+        acc_xyz[2] = rd_buf[0] << 8 | rd_buf[1];
+    }
+
+    // MPU6000 Gyro read.
+    {
+        uint8_t rd_buf[6] = {0};
+        // Reads the accelerometer data in LSB/g
+        i2c_read_bytes(ADDR_MPU6000, MPU6000_GYRO_OUT, rd_buf, 0x6);
+        uint16_t gyro_xyz[3] = {0};
+        gyro_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
+        gyro_xyz[1] = rd_buf[0] << 8 | rd_buf[1];
+        gyro_xyz[2] = rd_buf[0] << 8 | rd_buf[1];
+    }
     
     // Thermo read.
-    // float temp_data = thermometer.getTemperatureC();
+    // inplaceof: float temp_data = thermometer.getTemperatureC();
+    {
+        uint8_t rd_buf[2] = {0};
+        i2c_read_bytes(ADDR_TMP117, TMP117_TEMP_REG, rd_buf, 2);
+        uint16_t temperature = ((rd_buf[0] << 8) | rd_buf[1]); // Swaps MSB and LSB, casts to uint16_t.
+        float temp_degC = temperature * TMP117_RESOLUTION; // Converts integer value to degC.
+    }
     
     // TPile read.
-    // TPsample_t temperatures = thermopile.getSample();
+    // inplaceof: TPsample_t temperatures = thermopile.getSample();
+    // TODO: Manual thermopile reading.
 }
