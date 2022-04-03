@@ -23,20 +23,24 @@
         Serial.print(buffer);                                                                                               \
     }
 #else // SERIAL_DEBUG_PRINT_ENABLE
-#define sdbprintlf(format, ...){}
+#define sdbprintlf(format, ...) \
+    {                           \
+    }
 #endif // SERIAL_DEBUG_PRINT_ENABLE
 #endif // sdbprintf
 
 #ifndef sdbprintf
 #ifdef SERIAL_DEBUG_PRINT_ENABLE
-#define sdbprintf(format, ...)                                                                                             \
+#define sdbprintf(format, ...)                                                                                              \
     {                                                                                                                       \
         char buffer[snprintf(NULL, 0, "[%s:%d | %s] " format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__) + 1] = {0}; \
-        sprintf(buffer, "[%s:%d | %s] " format, __FILE__, __LINE__, __func__, ##__VA_ARGS__);                          \
+        sprintf(buffer, "[%s:%d | %s] " format, __FILE__, __LINE__, __func__, ##__VA_ARGS__);                               \
         Serial.print(buffer);                                                                                               \
     }
 #else // SERIAL_DEBUG_PRINT_ENABLE
-#define sdbprintf(format, ...){}
+#define sdbprintf(format, ...) \
+    {                          \
+    }
 #endif // SERIAL_DEBUG_PRINT_ENABLE
 #endif // sdbprintf
 

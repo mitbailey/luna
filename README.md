@@ -6,7 +6,8 @@ For the Great Lunar Expedition for Everyone (GLEE) 2023.
 
 ...any other sub-dependencies.
 
-`PROGRAM MEMORY AUDIT`  
+## Memory Usage
+PROGRAM MEMORY AUDIT  
 `STORAGE: 5692/30720 bytes (18%)`  
 `DYNAMIC:`  
 `- GLOBAL: 421/2048 bytes (20%)`  
