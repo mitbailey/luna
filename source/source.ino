@@ -15,21 +15,18 @@
 
 #include "meb_print_serial.h"
 
-// #include <GLEE_Sensor.h>
-// #include <TMP117.h>
-// #include <MPU6000.h>
-// #include <MLX90393.h>
-// #include <CAP.h>
-// #include <TPIS1385.h>
-// // #include <GLEE_Radio.h>
-// #include "GLEE_Radio_v2.h"
-
-// #include "luna.hpp"
+/// SENSOR CONNECTION CONDITIONALS
+#define USING_MLX90393
+#define USING_MPU6000
+#define USING_SX1272
+#define USING_TMP117
+#define USING_TPIS1385
+#define USING_CAP
 
 /// SENSOR-SPECIFIC CONSTANTS
 #define ADDR_MLX90393 0x0C
 #define ADDR_MPU6000 0x68
-#define ADDR_MPU6000_2 0x69
+// #define ADDR_MPU6000_2 0x69
 #define ADDR_SX1272 0x00 // UNKNOWN
 #define ADDR_TMP117 0x00 // UNKNOWN
 #define ADDR_TPIS1385 0x00 // UNKNOWN
@@ -312,7 +309,7 @@ static inline uint8_t i2cbus_read(uint8_t dev_addr, uint8_t *buf, uint8_t len)
  * @param inlen Length of input byte array.
  * @return uint8_t Length of bytes read.
  */
-static inline uint8_t i2cbus_xfer(uint8_t dev_addr, uint8_t *out_buf, uint8_t out_len, uint8_t *in_buf, uint8_t in_len)
+static inline uint8_t i2cbus_transfer(uint8_t dev_addr, uint8_t *out_buf, uint8_t out_len, uint8_t *in_buf, uint8_t in_len)
 {
     Wire.beginTransmission(dev_addr);
     Wire.write(out_buf, out_len);
@@ -349,6 +346,7 @@ void setup()
     // CAP initialization and setup.
     // None required.
 
+#ifdef USING_MLX90393
     // MLX90393 initialization and setup.  
     {
         // magnetometer.begin_I2C(); // Pointless
@@ -546,37 +544,115 @@ void setup()
             i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
         }
     }
+#endif // USING_MLX90393
 
+#ifdef USING_MPU6000
     // MPU6000 initialization and setup.
     {    
-        // accelerometer.begin(); // Pointless
-        // inplaceof: accelerometer.initialize();
-        {
-            // TODO: See sketch_apr04a.cpp for how to properly read and write with MPU6050.
-            // Reset all internal registers to defaults.
-            i2c_write_byte(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0b10000000);
-            uint8_t data[1] = {0};
-            do
-            {
-                i2c_read_bytes(ADDR_MPU6000, MPU6000_PWR_MGMT_1, data);
-                delay(1);
-            } while (data[0] == 0b10000000);
-            delay(100);
-            i2c_write_byte(ADDR_MPU6000, MPU6000_SIGNAL_PATH_RESET, 0b00000111);
-            delay(100);
-            // Set sample rate divisor.
-            i2c_write_byte(ADDR_MPU6000, MPU6000_SMPLRT_DIV, 0x0);
-            // Set filter bandwidth.
-            i2c_write_byte(ADDR_MPU6000, MPU6000_CONFIG, MPU6000_BAND_260_HZ);
-            // Set acceleration range to 2 Gs.
-            i2c_write_byte(ADDR_MPU6000, MPU6000_ACCEL_CONFIG, MPU6000_RANGE_2_G); // 0x0 = 2G; 0x8 = 4G; 0x10 = 8G; 0x18 = 16G
-            MPU6000_accel_scale = 16384; // 16384 = 2G; 8192 = 4G; 4096 = 8G; 2048 = 16G
-            // IDK what this does but its in the initializer.
-            i2c_write_byte(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0x1);
-        }
-        // accelerometer.setAccelRange(MPU6000_RANGE_2_G); // Redundant, already called in the initializer.
-    }
+        // TODO: See sketch_apr04a.cpp for how to properly read and write with MPU6050.
+        // Declare our I2C write and read buffers.
+        uint8_t wr_buf[2] = {0};
+        uint8_t rd_buf[2] = {0};
 
+        // Read from the WhoAmI? register.
+        wr_buf[0] = MPU6000_WHO_AM_I;
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
+
+        if (rd_buf[0] != ADDR_MPU6000)
+        {
+            sdbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
+            exit(1);
+        }
+
+        // Wake the MPU6000.
+        wr_buf[0] = MPU6000_PWR_MGMT_1;
+        wr_buf[1] = 0x0;
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        sdbprintlf("Sent wake-up command.");
+
+        /* NOTE: We may not want to do this if it changes the value of the wake-up register bit. May not be necessary.
+        // Begin resetting of all registers to defaults.
+        wr_buf[0] = MPU6000_PWR_MGMT_1;
+        wr_buf[1] = 0b10000000;
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        sdbprintlf("Send reset-all-registers command."); */
+
+        /* NOTE: Uncomment after testing.
+        // Reset analog and digital signal paths of the gyro, accel, and temp sensors.
+        wr_buf[0] = MPU6000_SIGNAL_PATH_RESET;
+        wr_buf[1] = 0b00000111;
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        sdbprintlf("Reset analog and digital signal paths of the gyroscope, accelerometer, and temperature sensors."); */
+
+        // Set to -2G to 2G range.
+        wr_buf[0] = MPU6000_ACCEL_CONFIG;
+        wr_buf[1] = 0x0;
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        // Check to see if the range is set properly.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("Set range to +-2G. Register reads: 0x%02X", rd_buf[0]);
+
+        if (rd_buf[0] != 0x0)
+        {
+            sdbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
+            exit(1);
+        }
+
+        /* NOTE: Uncomment after testing.
+        // Set sample rate divisor.
+        // Sample Rate = Gyroscope Output Rate / (1 + SMPLRT_DIV)
+        wr_buf[0] = MPU6000_SMPLRT_DIV;
+        wr_buf[1] = 0x0; // 
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        // Check to see if the sample rate was set properly.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("Set sample rate divisor. Register reads: 0x%02X", rd_buf[0]); */
+
+        /* NOTE: Uncomment after testing.
+        // Set filter bandwidth.
+        // First read what the current value is before clobbering anything.
+        wr_buf[0] = MPU6000_CONFIG;
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("Read CONFIG register as: 0x%02X", rd_buf[0]);
+
+        // We want the register to be DDDDD000, where Ds are don't-cares.
+        // Therefore, we must take the current register value, and bitwise AND it with the result of 0b11111000 (DDDDD000) bitwise ORed with our desired band value.
+        wr_buf[1] = rd_buf[0] & (0b11111000 | MPU6000_BAND_260_HZ);
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        sdbprintlf("Attempted to set CONFIG register to: 0x%02X", wr_buf[1]);
+
+        // Check to make sure we set the register correctly.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("CONFIG register now reads as: 0x%02X", rd_buf[0]); */
+        
+        /* NOTE: Uncomment after testing. 
+        // Select PLL with X axis gyroscope reference as our clock (defaults to internal oscillator).
+        wr_buf[0] = MPU6000_PWR_MGMT_1;
+        wr_buf[1] = 0x1;
+        i2cbus_write(ADDR_MPU6000, wr_buf, 2);
+
+        // Ensure PWR_MGMT_1 was set properly.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
+
+        sdbprintlf("PWR_MGMT_1 register reads: 0x%02X", rd_buf[0]); */
+
+        sdbprintlf("MPU6000 boot complete."); 
+    }
+#endif // USING_MPU6000
+
+#ifdef USING_TMP117
     // TMP117 initialization and setup.
     // None required.
 
@@ -624,36 +700,66 @@ void setup()
             TPIS_cal_K = ((float) (TPIS_cal_UOut1 - TPIS_cal_U0) / (pow((float) (TPIS_cal_TObj1 + 273.15f), 3.8f) - pow(25.0f + 273.15f,3.8f)));
         }
     }
+#endif // USING_TMP117
 
+#ifdef USING_SX1272
     // SX1272 initialization and setup.
     // TODO: Manual initialization for the radio transceiver system.
+#endif // USING_SX1272
 }
 
 void loop()
 {
-    // TODO: Manual radio T/RX.
+#ifdef USING_SX1272
+    // TODO: Manual radio T/RX, probably with an interrupt handler.
+#endif // USING_SX1272
 
+#ifdef USING_CAP
     // CAP read.
     int CAP_data = analogRead(PIN_CAP);
+#endif // USING_CAP
 
+#ifdef USING_MLX90393
     // MLX read.
     // inplaceof: mlx_sample_t mlx_data = magnetometer.getSample();
     // TODO: Manual MLX90393 magnetometer reading.
-    
+#endif // USING_MLX90393
+
     // MPU6000 Accel read.
-    // inplaceof: sensor_float_vec_t acc_data = accelerometer.getSample();
-    {
+#ifdef USING_MPU6000
+    {   
+        // Declare I2C read/write buffers.
+        uint8_t wr_buf[1] = {0};
         uint8_t rd_buf[6] = {0};
-        // Reads the accelerometer data in LSB/g
-        i2c_read_bytes(ADDR_MPU6000, MPU6000_ACCEL_OUT, rd_buf, 0x6);
+
+        // Request six bytes of accelerometer data.
+        wr_buf[0] = MPU6000_ACCEL_OUT; // For some reason we can get all six registers of accel. data (0x3B - 0x40) just by querying the first one.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
+
+        // Convert the data to a usable format.
         uint16_t acc_xyz[3] = {0};
         acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
         acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
-    }
 
+        // Convert to float and map properly.
+        float acc_xyz_f[3] = {0};
+        for (int i = 0; i < 3; i++)
+        {
+            if (acc_xyz[i] > 32767)
+                acc_xyz_f[i] = 4.f - (((float)acc_xyz[i]) / (16384.f));
+            else
+                acc_xyz_f[i] = 0.f - (((float)acc_xyz[i]) / (16384.f));
+        }
+        
+        sdbprintlf("Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
+    }
+#endif // USING_MPU6000
+
+#ifdef USING_MPU6000
     // MPU6000 Gyro read.
     {
+        // TODO: Fix this mess.
         uint8_t rd_buf[6] = {0};
         // Reads the accelerometer data in LSB/g
         i2c_read_bytes(ADDR_MPU6000, MPU6000_GYRO_OUT, rd_buf, 0x6);
@@ -662,7 +768,9 @@ void loop()
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
     }
+#endif // USING_MPU6000
     
+#ifdef USING_TMP117
     // Thermo read.
     // inplaceof: float temp_data = thermometer.getTemperatureC();
     {
@@ -671,8 +779,15 @@ void loop()
         uint16_t temperature = ((rd_buf[0] << 8) | rd_buf[1]); // Swaps MSB and LSB, casts to uint16_t.
         float temp_degC = temperature * TMP117_RESOLUTION; // Converts integer value to degC.
     }
+#endif // USING_TMP117
     
+#ifdef USING_TPIS1385
     // TPile read.
     // inplaceof: TPsample_t temperatures = thermopile.getSample();
     // TODO: Manual thermopile reading.
+#endif // USING_TPIS1385
+
+#ifdef USING_SX1272
+    // TODO: Figure out transmissions.
+#endif // USING_SX1272
 }

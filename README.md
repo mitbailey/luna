@@ -8,9 +8,9 @@ For the Great Lunar Expedition for Everyone (GLEE) 2023.
 
 ## Memory Usage
 PROGRAM MEMORY AUDIT  
-`STORAGE: 5692/30720 bytes (18%)`  
+`STORAGE: 4542/30720 bytes (14%)`  
 `DYNAMIC:`  
-`- GLOBAL: 421/2048 bytes (20%)`  
+`- GLOBAL: 225/2048 bytes (10%)`  
 `- 1627 bytes available locally`   
   
 Note that Arduino.h alone, when compiled, uses:     
