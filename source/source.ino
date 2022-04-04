@@ -725,7 +725,7 @@ void loop()
     // TODO: Manual MLX90393 magnetometer reading.
 #endif // USING_MLX90393
 
-    // MPU6000 Accel read.
+    // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
     {   
         // Declare I2C read/write buffers.
@@ -757,7 +757,7 @@ void loop()
 #endif // USING_MPU6000
 
 #ifdef USING_MPU6000
-    // MPU6000 Gyro read.
+    // MPU6000 gyrometer read.
     {
         // Declare I2C read/write buffers.
         uint8_t wr_buf[1] = {0};
@@ -778,7 +778,7 @@ void loop()
 #endif // USING_MPU6000
 
 #ifdef USING_MPU6000
-    // MPU6000 temp read.
+    // MPU6000 temperature read.
     {
         // Declare I2C read / write buffers.
         uint8_t wr_buf[1] = {0};
@@ -796,13 +796,19 @@ void loop()
 #endif // USING_MPU6000
     
 #ifdef USING_TMP117
-    // Thermo read.
-    // inplaceof: float temp_data = thermometer.getTemperatureC();
+    // TMP117 thermometer read.
     {
+        uint8_t wr_buf[1] = {0};
         uint8_t rd_buf[2] = {0};
-        i2c_read_bytes(ADDR_TMP117, TMP117_TEMP_REG, rd_buf, 2);
-        uint16_t temperature = ((rd_buf[0] << 8) | rd_buf[1]); // Swaps MSB and LSB, casts to uint16_t.
-        float temp_degC = temperature * TMP117_RESOLUTION; // Converts integer value to degC.
+
+        // Read temperature register.
+        wr_buf[0] = TMP117_TEMP_REG;
+        i2cbus_transfer(ADDR_TMP117, wr_buf, 1, rd_buf, 2);
+
+        // Convert to degrees C.
+        float temp = (rd_buf[0] << 8 | rd_buf[1]) * TMP117_RESOLUTION;
+
+        sdbprintlf("[TMP117] Temp. (degC): %.06f", temp);
     }
 #endif // USING_TMP117
     
