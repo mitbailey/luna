@@ -259,7 +259,7 @@ static inline uint8_t i2c_read_bytes_passive(uint8_t slave_addr, uint8_t *data, 
     return i;
 }
 
-// TODO: Migrate to the i2cbus_* functions.
+// TODO: Migrate to the i2cbus_* functions: remove all of the above functions.
 /**
  * @brief Write bytes to the i2c device.
  * Note: Bus access by this function is protected by a recursive
@@ -752,21 +752,46 @@ void loop()
                 acc_xyz_f[i] = 0.f - (((float)acc_xyz[i]) / (16384.f));
         }
         
-        sdbprintlf("Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
+        sdbprintlf("[MPU6000] Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
     }
 #endif // USING_MPU6000
 
 #ifdef USING_MPU6000
     // MPU6000 Gyro read.
     {
-        // TODO: Fix this mess.
+        // Declare I2C read/write buffers.
+        uint8_t wr_buf[1] = {0};
         uint8_t rd_buf[6] = {0};
-        // Reads the accelerometer data in LSB/g
-        i2c_read_bytes(ADDR_MPU6000, MPU6000_GYRO_OUT, rd_buf, 0x6);
+
+        // Request six bytes of gyrometer data.
+        wr_buf[0] = MPU6000_GYRO_OUT;
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
+
+        // Convert the data to a usable format.
         uint16_t gyro_xyz[3] = {0};
         gyro_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
+
+        sdbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
+    }
+#endif // USING_MPU6000
+
+#ifdef USING_MPU6000
+    // MPU6000 temp read.
+    {
+        // Declare I2C read / write buffers.
+        uint8_t wr_buf[1] = {0};
+        uint8_t rd_buf[2] = {0};
+
+        // Request two bytes of thermal data.
+        wr_buf[0] = MPU6000_TEMP_OUT;
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 2);
+
+        // Convert the data to a usable format.
+        uint16_t temp = rd_buf[0] << 8 | rd_buf[1];
+
+        sdbprintlf("[MPU6000] Temp. (raw): %d", temp);
     }
 #endif // USING_MPU6000
     
