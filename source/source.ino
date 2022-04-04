@@ -262,6 +262,69 @@ static inline uint8_t i2c_read_bytes_passive(uint8_t slave_addr, uint8_t *data, 
     return i;
 }
 
+// TODO: Migrate to the i2cbus_* functions.
+/**
+ * @brief Write bytes to the i2c device.
+ * Note: Bus access by this function is protected by a recursive
+ * pthread mutex.
+ * 
+ * @param dev_addr I2C device address.
+ * @param buf Pointer to byte array to write (MSB first)
+ * @param len Length of byte array
+ * @return uint8_t Length of bytes written.
+ */
+static inline uint8_t i2cbus_write(uint8_t dev_addr, uint8_t *buf, uint8_t len)
+{
+    Wire.beginTransmission(dev_addr);
+    uint8_t bytes = Wire.write(buf, len);
+    Wire.endTransmission();
+    return bytes;
+}
+
+/**
+ * @brief Read bytes from the i2c device.
+ * Note: Bus access by this function is protected by a recursive
+ * pthread mutex.
+ * 
+ * @param dev_addr I2C device address.
+ * @param buf Pointer to byte array to read to (MSB first)
+ * @param len Length of byte array
+ * @return uint8_t Length of bytes read.
+ */
+static inline uint8_t i2cbus_read(uint8_t dev_addr, uint8_t *buf, uint8_t len)
+{
+    Wire.requestFrom(dev_addr, len);
+    uint8_t i = 0;
+    for(; i < len; i++)
+        buf[i] = Wire.read();
+    return i;
+}
+
+/**
+ * @brief Function to do a write, and get the reply in one operation. 
+ * 
+ * Avoid using this function if you have read or write buffer lengths zero.
+ * 
+ * @param dev_addr I2C device address.
+ * @param outbuf Pointer to byte array to write (MSB first).
+ * @param outlen Length of output byte array.
+ * @param inbuf Pointer to byte array to read to (MSB first), can be the same as out_buf.
+ * @param inlen Length of input byte array.
+ * @return uint8_t Length of bytes read.
+ */
+static inline uint8_t i2cbus_xfer(uint8_t dev_addr, uint8_t *out_buf, uint8_t out_len, uint8_t *in_buf, uint8_t in_len)
+{
+    Wire.beginTransmission(dev_addr);
+    Wire.write(out_buf, out_len);
+    Wire.endTransmission();
+
+    Wire.requestFrom(dev_addr, in_len);
+    uint8_t i = 0;
+    for(; i < in_len; i++)
+        in_buf[i] = Wire.read();
+    return i;
+}
+
 // TEMP
 // MLX90393 magnetometer = MLX90393(1,false);
 // MPU6000 accelerometer(1, false); // Sets sensor ID to 1 and debugging to false
@@ -489,6 +552,7 @@ void setup()
         // accelerometer.begin(); // Pointless
         // inplaceof: accelerometer.initialize();
         {
+            // TODO: See sketch_apr04a.cpp for how to properly read and write with MPU6050.
             // Reset all internal registers to defaults.
             i2c_write_byte(ADDR_MPU6000, MPU6000_PWR_MGMT_1, 0b10000000);
             uint8_t data[1] = {0};
@@ -584,8 +648,8 @@ void loop()
         i2c_read_bytes(ADDR_MPU6000, MPU6000_ACCEL_OUT, rd_buf, 0x6);
         uint16_t acc_xyz[3] = {0};
         acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
-        acc_xyz[1] = rd_buf[0] << 8 | rd_buf[1];
-        acc_xyz[2] = rd_buf[0] << 8 | rd_buf[1];
+        acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
+        acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
     }
 
     // MPU6000 Gyro read.
@@ -595,8 +659,8 @@ void loop()
         i2c_read_bytes(ADDR_MPU6000, MPU6000_GYRO_OUT, rd_buf, 0x6);
         uint16_t gyro_xyz[3] = {0};
         gyro_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
-        gyro_xyz[1] = rd_buf[0] << 8 | rd_buf[1];
-        gyro_xyz[2] = rd_buf[0] << 8 | rd_buf[1];
+        gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
+        gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
     }
     
     // Thermo read.
