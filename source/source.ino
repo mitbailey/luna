@@ -15,7 +15,7 @@
 
 #include "meb_print_serial.h"
 
-/// SENSOR CONNECTION CONDITIONALS
+/// SENSOR USAGE CONDITIONALS
 #define USING_MLX90393
 #define USING_MPU6000
 #define USING_SX1272
@@ -352,64 +352,44 @@ void setup()
         // magnetometer.begin_I2C(); // Pointless
         // inplaceof: magnetometer.setGain(MLX90393_GAIN_2_5X);
         {
-            uint8_t data[3] = {0}; // [0] is High byte, [1] is Low byte. (HHHH HHHH LLLL LLLL)
+            uint8_t wr_buf[3] = {0};
+            uint8_t rd_buf[3] = {0};
 
-            data[0] = (MLX90393_CONF1 << 0x2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
-            memset(data, 0x0, sizeof(data));
-            
-            i2c_read_bytes_passive(ADDR_MLX90393, data, 2); // Actually grab the two bytes.
-            delay(15); // Wait 15ms after transactions as per the datasheet.
+            // Retrieve configuration data bytes.
+            wr_buf[0] = MLX90393_REG_RR;
+            wr_buf[1] = MLX90393_CONF1 << 0x2;
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
-            // uint16_t data16 = ((uint16_t)data[0] << 8 | data[1]);
-            // data16 &= ~0x0070;
-            // data16 &= 0b10001111;
+            // Mask off gain bits from low byte.
+            wr_buf[2] = rd_buf[1] & 0b10001111;
 
-            // Mask off gain bits.
-            // [0] is High byte, [1] is Low byte.
-            // data[0] &= 0b11111111;
-            data[1] &= 0b10001111;
-            
             // Set gain bits.
-            // data16 |= (0x07 << MLX90393_GAIN_SHIFT);
-            // data16 |= (0b01110000);
-            // data[0] |= 0b00000000;
-            data[1] |= 0b01110000;
+            wr_buf[2] |= 0b01110000;
 
-            data[2] = (MLX90393_CONF1 << 0x2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x2);
-            delay(15);
-            // Read status byte.
-            uint8_t status_buffer[2] = {0};
-            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 0x2);
+            // Simultaneously sets the CONF1 register and retrieves status byte.
+            wr_buf[0] = MLX90393_REG_WR;
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 3, rd_buf, 1);
+
+            sdbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
         {
-            // uint16_t data;
-            uint8_t data[3] = {0};
-            // readRegister(MLX90393_CONF3, &data);
-            data[0] = (MLX90393_CONF3 << 0x2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
-            memset(data, 0x0, sizeof(data));
+            uint8_t wr_buf[3] = {0};
+            uint8_t rd_buf[3] = {0};
 
-            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
-            delay(15);
+            // Retrieve CONF3 data.
+            wr_buf[0] = MLX90393_REG_RR;
+            wr_buf[1] = (MLX90393_CONF3 << 0x2);
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
-            // [0] is High byte, [1] is Low byte.
-            // data[0] &= 0b11111111;
-            data[1] &= 0b10011111;
+            wr_buf[2] = rd_buf[1] & 0b10011111;
+            wr_buf[2] |= MLX90393_RES_19 << 5;
 
-            // data[0] |= (MLX90393_RES_19 << 5) >> 8;
-            data[1] |= MLX90393_RES_19 << 5;
+            wr_buf[0] = MLX90393_REG_WR;
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 3, rd_buf, 1);
 
-            data[2] = (MLX90393_CONF3 << 2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
-            delay(15);
-
-            // Read status byte.
-            uint8_t status_buffer[2] = {0};
-            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
+            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
@@ -708,8 +688,12 @@ void setup()
 #endif // USING_SX1272
 }
 
+unsigned long delta_time = 0;
 void loop()
 {
+    // Mark the beginning of the loop.
+    delta_time = millis();
+
 #ifdef USING_SX1272
     // TODO: Manual radio T/RX, probably with an interrupt handler.
 #endif // USING_SX1272
@@ -821,4 +805,7 @@ void loop()
 #ifdef USING_SX1272
     // TODO: Figure out transmissions.
 #endif // USING_SX1272
+
+    delta_time -= millis();
+    if (cadence )
 }
