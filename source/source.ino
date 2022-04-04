@@ -352,7 +352,7 @@ void setup()
         // magnetometer.begin_I2C(); // Pointless
         // inplaceof: magnetometer.setGain(MLX90393_GAIN_2_5X);
         {
-            uint8_t wr_buf[3] = {0};
+            uint8_t wr_buf[4] = {0};
             uint8_t rd_buf[3] = {0};
 
             // Retrieve configuration data bytes.
@@ -361,21 +361,23 @@ void setup()
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
             // Mask off gain bits from low byte.
-            wr_buf[2] = rd_buf[1] & 0b10001111;
+            wr_buf[2] = rd_buf[0];
+            wr_buf[3] = rd_buf[1] & 0b10001111;
 
             // Set gain bits.
-            wr_buf[2] |= 0b01110000;
+            wr_buf[3] |= 0b01110000;
 
             // Simultaneously sets the CONF1 register and retrieves status byte.
             wr_buf[0] = MLX90393_REG_WR;
-            i2cbus_transfer(ADDR_MLX90393, wr_buf, 3, rd_buf, 1);
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
             sdbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
-
+        
+        // TODO: Settings resolutions of X, Y, and Z axes may be combinable (same register).
         // inplaceof: magnetometer.setResolution(MLX90393_X, MLX90393_RES_19);
         {
-            uint8_t wr_buf[3] = {0};
+            uint8_t wr_buf[4] = {0};
             uint8_t rd_buf[3] = {0};
 
             // Retrieve CONF3 data.
@@ -383,66 +385,54 @@ void setup()
             wr_buf[1] = (MLX90393_CONF3 << 0x2);
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
-            wr_buf[2] = rd_buf[1] & 0b10011111;
-            wr_buf[2] |= MLX90393_RES_19 << 5;
+            wr_buf[2] = rd_buf[0];
+            wr_buf[3] = rd_buf[1] & 0b10011111;
+            wr_buf[3] |= MLX90393_RES_19 << 5;
 
             wr_buf[0] = MLX90393_REG_WR;
-            i2cbus_transfer(ADDR_MLX90393, wr_buf, 3, rd_buf, 1);
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
             sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
         {
-            uint8_t data[3] = {0};
+            uint8_t wr_buf[4] = {0};
+            uint8_t rd_buf[3] = {0};
 
-            data[0] = (MLX90393_CONF3 << 0x2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
-            memset(data, 0x0, sizeof(data));
+            // Retrieve CONF3 data.
+            wr_buf[0] = MLX90393_REG_RR;
+            wr_buf[1] = (MLX90393_CONF3 << 0x2);
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
-            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
-            delay(15);
+            wr_buf[2] = rd_buf[0] & 0b11111110;
+            wr_buf[3] = rd_buf[1] & 0b01111111;
+            wr_buf[3] |= MLX90393_RES_19 << 7;
 
-            // [0] is High byte, [1] is Low byte.
-            data[0] &= 0b11111110;
-            data[1] &= 0b01111111;
+            wr_buf[0] = MLX90393_REG_WR;
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            // data[0] |= (MLX90393_RES_19 << 7) >> 8;
-            data[1] |= MLX90393_RES_19 << 7;
-
-            data[2] = (MLX90393_CONF3 << 2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
-            delay(15);
-
-            uint8_t status_buffer[2] = {0};
-            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
+            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
         {
-            uint8_t data[3] = {0};
+            uint8_t wr_buf[4] = {0};
+            uint8_t rd_buf[3] = {0};
 
-            data[0] = (MLX90393_CONF3 << 0x2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_RR, data, 0x1); // Pokes the read register asking for data from CONF1.
-            memset(data, 0x0, sizeof(data));
+            // Retrieve CONF3 data.
+            wr_buf[0] = MLX90393_REG_RR;
+            wr_buf[1] = (MLX90393_CONF3 << 0x2);
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 2, rd_buf, 2);
 
-            i2c_read_bytes_passive(ADDR_MLX90393, data, 0x2); // Reads the data.
-            delay(15);
+            wr_buf[2] = rd_buf[0] & 0b11111001;
+            wr_buf[3] = rd_buf[1];
+            wr_buf[3] |= MLX90393_RES_19 << 9;
 
-            // [0] is High byte, [1] is Low byte.
-            data[0] &= 0b11111001;
-            // data[1] &= 0b11111111;
+            wr_buf[0] = MLX90393_REG_WR;
+            i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            // data[0] |= (MLX90393_RES_19 << 9) >> 8; aka:
-            data[0] |= (MLX90393_RES_19 << 1);
-            data[1] |= MLX90393_RES_19 << 9;
-
-            data[2] = (MLX90393_CONF3 << 2);
-            i2c_write_bytes(ADDR_MLX90393, MLX90393_REG_WR, data, 0x3);
-            delay(15);
-
-            uint8_t status_buffer[2] = {0};
-            i2c_read_bytes_passive(ADDR_MLX90393, status_buffer, 2);
+            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
