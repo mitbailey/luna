@@ -713,12 +713,14 @@ void loop()
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
 
         // Convert the data to a usable format.
-        uint16_t acc_xyz[3] = {0};
+        int16_t acc_xyz[3] = {0};
         acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
         acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
 
-        // Convert to float and map properly.
+        sbprintlf("[MPU6000] Accel. XYZ (raw): %d %d %d", acc_xyz[0], acc_xyz[1], acc_xyz[2]);
+
+/*         // Convert to float and map properly.
         float acc_xyz_f[3] = {0};
         for (int i = 0; i < 3; i++)
         {
@@ -734,7 +736,7 @@ void loop()
         Serial.print(" ");
         Serial.print(acc_xyz_f[1]);
         Serial.print(" ");
-        Serial.println(acc_xyz_f[2]);
+        Serial.println(acc_xyz_f[2]); */
     }
 #endif // USING_MPU6000
 
