@@ -11,17 +11,19 @@
 
 #include <Wire.h>
 
-// #define SERIAL_DEBUG_PRINT_ENABLE // Allows sdbprintlf(...) & sdbprintf(...) printouts if defined.
+#define SERIAL_DEBUG_PRINT_ENABLE // Allows sbprintlf(...) & sdbprintf(...) printouts if defined.
 
 #include "meb_print_serial.h"
 
+#define CADENCE 500
+
 /// SENSOR USAGE CONDITIONALS
-#define USING_MLX90393
+// #define USING_MLX90393
 #define USING_MPU6000
-#define USING_SX1272
-#define USING_TMP117
-#define USING_TPIS1385
-#define USING_CAP
+// #define USING_SX1272
+// #define USING_TMP117
+// #define USING_TPIS1385
+// #define USING_CAP
 
 /// SENSOR-SPECIFIC CONSTANTS
 #define ADDR_MLX90393 0x0C
@@ -371,7 +373,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sdbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
+            sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
         
         // TODO: Settings resolutions of X, Y, and Z axes may be combinable (same register).
@@ -392,7 +394,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
@@ -412,7 +414,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
@@ -432,7 +434,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sdbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
@@ -528,11 +530,11 @@ void setup()
         wr_buf[0] = MPU6000_WHO_AM_I;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
+        sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
 
         if (rd_buf[0] != ADDR_MPU6000)
         {
-            sdbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
+            sbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
             exit(1);
         }
 
@@ -541,7 +543,7 @@ void setup()
         wr_buf[1] = 0x0;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sdbprintlf("Sent wake-up command.");
+        sbprintlf("Sent wake-up command.");
 
         /* NOTE: We may not want to do this if it changes the value of the wake-up register bit. May not be necessary.
         // Begin resetting of all registers to defaults.
@@ -549,7 +551,7 @@ void setup()
         wr_buf[1] = 0b10000000;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sdbprintlf("Send reset-all-registers command."); */
+        sbprintlf("Send reset-all-registers command."); */
 
         /* NOTE: Uncomment after testing.
         // Reset analog and digital signal paths of the gyro, accel, and temp sensors.
@@ -557,7 +559,7 @@ void setup()
         wr_buf[1] = 0b00000111;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sdbprintlf("Reset analog and digital signal paths of the gyroscope, accelerometer, and temperature sensors."); */
+        sbprintlf("Reset analog and digital signal paths of the gyroscope, accelerometer, and temperature sensors."); */
 
         // Set to -2G to 2G range.
         wr_buf[0] = MPU6000_ACCEL_CONFIG;
@@ -567,11 +569,11 @@ void setup()
         // Check to see if the range is set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("Set range to +-2G. Register reads: 0x%02X", rd_buf[0]);
+        sbprintlf("Set range to +-2G. Register reads: 0x%02X", rd_buf[0]);
 
         if (rd_buf[0] != 0x0)
         {
-            sdbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
+            sbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
             exit(1);
         }
 
@@ -585,7 +587,7 @@ void setup()
         // Check to see if the sample rate was set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("Set sample rate divisor. Register reads: 0x%02X", rd_buf[0]); */
+        sbprintlf("Set sample rate divisor. Register reads: 0x%02X", rd_buf[0]); */
 
         /* NOTE: Uncomment after testing.
         // Set filter bandwidth.
@@ -593,19 +595,19 @@ void setup()
         wr_buf[0] = MPU6000_CONFIG;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("Read CONFIG register as: 0x%02X", rd_buf[0]);
+        sbprintlf("Read CONFIG register as: 0x%02X", rd_buf[0]);
 
         // We want the register to be DDDDD000, where Ds are don't-cares.
         // Therefore, we must take the current register value, and bitwise AND it with the result of 0b11111000 (DDDDD000) bitwise ORed with our desired band value.
         wr_buf[1] = rd_buf[0] & (0b11111000 | MPU6000_BAND_260_HZ);
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sdbprintlf("Attempted to set CONFIG register to: 0x%02X", wr_buf[1]);
+        sbprintlf("Attempted to set CONFIG register to: 0x%02X", wr_buf[1]);
 
         // Check to make sure we set the register correctly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("CONFIG register now reads as: 0x%02X", rd_buf[0]); */
+        sbprintlf("CONFIG register now reads as: 0x%02X", rd_buf[0]); */
         
         /* NOTE: Uncomment after testing. 
         // Select PLL with X axis gyroscope reference as our clock (defaults to internal oscillator).
@@ -616,9 +618,9 @@ void setup()
         // Ensure PWR_MGMT_1 was set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sdbprintlf("PWR_MGMT_1 register reads: 0x%02X", rd_buf[0]); */
+        sbprintlf("PWR_MGMT_1 register reads: 0x%02X", rd_buf[0]); */
 
-        sdbprintlf("MPU6000 boot complete."); 
+        sbprintlf("MPU6000 boot complete."); 
     }
 #endif // USING_MPU6000
 
@@ -725,8 +727,14 @@ void loop()
             else
                 acc_xyz_f[i] = 0.f - (((float)acc_xyz[i]) / (16384.f));
         }
-        
-        sdbprintlf("[MPU6000] Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
+        // Arduino's snprintf does not support floats!
+        // sbprintlf("[MPU6000] Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
+        Serial.print("[MPU6000] Accel. XYZ (g): ");
+        Serial.print(acc_xyz_f[0]);
+        Serial.print(" ");
+        Serial.print(acc_xyz_f[1]);
+        Serial.print(" ");
+        Serial.println(acc_xyz_f[2]);
     }
 #endif // USING_MPU6000
 
@@ -747,7 +755,7 @@ void loop()
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
 
-        sdbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
+        sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
     }
 #endif // USING_MPU6000
 
@@ -765,7 +773,7 @@ void loop()
         // Convert the data to a usable format.
         uint16_t temp = rd_buf[0] << 8 | rd_buf[1];
 
-        sdbprintlf("[MPU6000] Temp. (raw): %d", temp);
+        sbprintlf("[MPU6000] Temp. (raw): %d", temp);
     }
 #endif // USING_MPU6000
     
@@ -782,7 +790,7 @@ void loop()
         // Convert to degrees C.
         float temp = (rd_buf[0] << 8 | rd_buf[1]) * TMP117_RESOLUTION;
 
-        sdbprintlf("[TMP117] Temp. (degC): %.06f", temp);
+        sbprintlf("[TMP117] Temp. (degC): %.06f", temp);
     }
 #endif // USING_TMP117
     
@@ -797,5 +805,6 @@ void loop()
 #endif // USING_SX1272
 
     delta_time -= millis();
-    if (cadence )
+    if (CADENCE - delta_time > 0)
+        delay(CADENCE - delta_time);
 }
