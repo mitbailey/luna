@@ -15,7 +15,8 @@
 
 #include "meb_print_serial.h"
 
-#define CADENCE 500
+// The program loop is guaranteed to run at most this many times per second.
+#define MAX_FREQUENCY 4
 
 /// SENSOR USAGE CONDITIONALS
 // #define USING_MLX90393
@@ -25,7 +26,17 @@
 // #define USING_TPIS1385
 // #define USING_CAP
 
-/// SENSOR-SPECIFIC CONSTANTS
+// TODO: Change to maximum possible length.
+// Accelerometer Data Array Size = ACC_DATA_LEN * 6Bytes
+// LENGTH CANNOT EXCEED 254 (255 - 1) due to uint8_t limits.
+#define ACC_DATA_LEN 210 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
+// How many samples do we average together before moving on?
+#define ACC_AVG_SAMP MAX_FREQUENCY
+
+/////////////////////////////////
+/// SENSOR-SPECIFIC CONSTANTS ///
+/////////////////////////////////
+
 #define ADDR_MLX90393 0x0C
 #define ADDR_MPU6000 0x68
 // #define ADDR_MPU6000_2 0x69
@@ -166,6 +177,14 @@
 #define TP_T_OBJ_1 50                           // 1xbytes 
 #define TP_I2C_ADDR 63  
 #define TPIS1385_I2C_ADDR 0x0D
+
+// This type is used for storing processed accelerometer data into the acc_data array. Note: Processed meaning rolling averaged.
+typedef struct
+{
+    uint16_t x;
+    uint16_t y;
+    uint16_t z;
+} acc_data_t;
 
 /**
  * @brief Writes slave device and register addresses.
@@ -373,7 +392,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
+//            sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
         
         // TODO: Settings resolutions of X, Y, and Z axes may be combinable (same register).
@@ -394,7 +413,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
@@ -414,7 +433,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
@@ -434,7 +453,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
@@ -530,7 +549,9 @@ void setup()
         wr_buf[0] = MPU6000_WHO_AM_I;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
+        //sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
+//        Serial.print("WhoAmI: ");
+//        Serial.println(rd_buf[0], HEX);
 
         if (rd_buf[0] != ADDR_MPU6000)
         {
@@ -543,7 +564,7 @@ void setup()
         wr_buf[1] = 0x0;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sbprintlf("Sent wake-up command.");
+//        sbprintlf("Sent wake-up command.");
 
         /* NOTE: We may not want to do this if it changes the value of the wake-up register bit. May not be necessary.
         // Begin resetting of all registers to defaults.
@@ -680,11 +701,19 @@ void setup()
 #endif // USING_SX1272
 }
 
-unsigned long delta_time = 0;
+acc_data_t acc_data[ACC_DATA_LEN];
+// If ACC_DATA_LEN * ACC_AVG_SAMP is <= 255, use uint8_t.
+// If ACC_DATA_LEN * ACC_AVG_SAMP is <= 65535, use uint16_t.
+uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURPOSES ONLY! DO NOT MISUSE.
+// uint32_t time = 0;
+// If we are currently recording an 'event,' this will be set to the beginning index and end index of the data recorded during the event. New data recorded should not overwrite this.
+uint8_t overwrite_deny_start = ACC_DATA_LEN + 1;
+uint8_t overwrite_deny_end = ACC_DATA_LEN + 1;
+uint8_t accel_event = 0;
 void loop()
 {
     // Mark the beginning of the loop.
-    delta_time = millis();
+    // time = millis();
 
 #ifdef USING_SX1272
     // TODO: Manual radio T/RX, probably with an interrupt handler.
@@ -704,6 +733,44 @@ void loop()
     // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
     {   
+        // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
+        acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
+
+        // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
+        // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
+        // UNTRANSMITTED RECORDED data is marked by the overwrite_deny_start and overwrite_deny_end bounds.
+        // While sampling, we should skip over UNTRANSMITTED RECORDED data.
+        if (accel_event)
+        { // Currently experiencing an accelerometer event.
+            if ((acc_i / ACC_AVG_SAMP) >= overwrite_deny_start)
+            {
+                // We just reached, while RECORDING, the beginning of the UNTRANSMITTED RECORDED data section.
+                // TODO: Determine what we do; do we overwrite old data or cancel the event recording?
+            }
+        }
+        else
+        { // Not currently experiencing an accelerometer event.
+            if ((acc_i / ACC_AVG_SAMP) >= overwrite_deny_start)
+            {
+                // We just reached, while SAMPLING, the beginning of the UNTRANSMITTED RECORDED data section.
+                // We should skip over this area and continue sampling.
+                acc_i += overwrite_deny_end * ACC_AVG_SAMP;
+            }
+        }
+
+        if (overwrite_deny_start < overwrite_deny_end)
+        { // OOOOOOO|XXXXXXXX|OOO
+
+        }
+        else if (overwrite_deny_start > overwrite_deny_end)
+        { // XXX|OOOOOOOOOOO|XXXX
+
+        }
+        else
+        {
+            // _start == _end
+        }
+
         // Declare I2C read/write buffers.
         uint8_t wr_buf[1] = {0};
         uint8_t rd_buf[6] = {0};
@@ -712,13 +779,36 @@ void loop()
         wr_buf[0] = MPU6000_ACCEL_OUT; // For some reason we can get all six registers of accel. data (0x3B - 0x40) just by querying the first one.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
 
-        // Convert the data to a usable format.
-        int16_t acc_xyz[3] = {0};
-        acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
-        acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
-        acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
+        // sbprintlf("0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X", rd_buf[0], rd_buf[1], rd_buf[2], rd_buf[3], rd_buf[4], rd_buf[5]);
 
-        sbprintlf("[MPU6000] Accel. XYZ (raw): %d %d %d", acc_xyz[0], acc_xyz[1], acc_xyz[2]);
+        // Convert the data to a usable format.
+        // acc_data[acc_i].x = rd_buf[0] << 8 | rd_buf[1];
+        // acc_data[acc_i].y = rd_buf[2] << 8 | rd_buf[3];
+        // acc_data[acc_i].z = rd_buf[4] << 8 | rd_buf[5];
+
+        // Converts the data into a usable format, then averages and stores the newly rolling-averaged data into the data array.
+        // To calculate the new average after the Nth number, it multiplies the old average by N - 1, adds the new values, and divides this total by N; N is acc_i + 1.
+        // "rd_buf[4] << 8 | rd_buf[5]" is the process by which the data is converted into useful values.
+        acc_data[(acc_i/ACC_AVG_SAMP)].x = (int)((((acc_data[(acc_i/ACC_AVG_SAMP)].x) * (acc_i/ACC_AVG_SAMP)) + (rd_buf[0] << 8 | rd_buf[1])) / ((acc_i/ACC_AVG_SAMP) + 1));
+        acc_data[(acc_i/ACC_AVG_SAMP)].y = (int)((((acc_data[(acc_i/ACC_AVG_SAMP)].x) * (acc_i/ACC_AVG_SAMP)) + (rd_buf[2] << 8 | rd_buf[3])) / ((acc_i/ACC_AVG_SAMP) + 1));
+        acc_data[(acc_i/ACC_AVG_SAMP)].z = (int)((((acc_data[(acc_i/ACC_AVG_SAMP)].x) * (acc_i/ACC_AVG_SAMP)) + (rd_buf[4] << 8 | rd_buf[5])) / ((acc_i/ACC_AVG_SAMP) + 1));
+
+        // int16_t acc_xyz[3] = {0};
+        // acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
+        // acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
+        // acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
+
+//        static int16_t x_max, y_max, z_max;
+//        static int16_t x_del, y_del, z_del;
+//        static int16_t z_max
+
+        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].x);
+        Serial.print(" ");
+        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].y);
+        Serial.print(" ");
+        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].z);
+
+        // sbprintlf("[MPU6000] Accel. XYZ (raw): %d %d %d", acc_xyz[0], acc_xyz[1], acc_xyz[2]);
 
 /*         // Convert to float and map properly.
         float acc_xyz_f[3] = {0};
@@ -757,7 +847,7 @@ void loop()
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
 
-        sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
+        // sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
     }
 #endif // USING_MPU6000
 
@@ -775,7 +865,7 @@ void loop()
         // Convert the data to a usable format.
         uint16_t temp = rd_buf[0] << 8 | rd_buf[1];
 
-        sbprintlf("[MPU6000] Temp. (raw): %d", temp);
+        // sbprintlf("[MPU6000] Temp. (raw): %d", temp);
     }
 #endif // USING_MPU6000
     
@@ -806,7 +896,6 @@ void loop()
     // TODO: Figure out transmissions.
 #endif // USING_SX1272
 
-    delta_time -= millis();
-    if (CADENCE - delta_time > 0)
-        delay(CADENCE - delta_time);
+    // While this does not ensure a constant cadence, it is the most efficient manner of ensuring the program loop runs at most twice per second.
+    delay(1000 / MAX_FREQUENCY);
 }

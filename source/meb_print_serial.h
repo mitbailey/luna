@@ -20,7 +20,7 @@
     {                                                                                                                       \
         char buffer[snprintf(NULL, 0, "[%s:%d | %s] " format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__) + 1] = {0}; \
         sprintf(buffer, "[%s:%d | %s] " format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__);                          \
-        Serial.write(buffer, sizeof(buffer));                                                                               \
+        Serial.print(buffer);                                                                                               \
     }
 #else // SERIAL_DEBUG_PRINT_ENABLE
 #define sdbprintlf(format, ...) \
@@ -35,7 +35,7 @@
     {                                                                                                                       \
         char buffer[snprintf(NULL, 0, "[%s:%d | %s] " format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__) + 1] = {0}; \
         sprintf(buffer, "[%s:%d | %s] " format, __FILE__, __LINE__, __func__, ##__VA_ARGS__);                               \
-        Serial.write(buffer);                                                                                               \
+        Serial.print(buffer);                                                                                               \
     }
 #else // SERIAL_DEBUG_PRINT_ENABLE
 #define sdbprintf(format, ...) \
@@ -46,11 +46,11 @@
 
 #ifndef sbprintlf
 #ifdef SERIAL_DEBUG_PRINT_ENABLE
-#define sbprintlf(format, ...)                                                                \
-    {                                                                                         \
-        char buffer[snprintf(NULL, 0, "[%s:%d | %s] " format "\n", ##__VA_ARGS__) + 1] = {0}; \
-        sprintf(buffer, format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__);            \
-        Serial.write(buffer, sizeof(buffer));                                                 \
+#define sbprintlf(format, ...)                                                     \
+    {                                                                              \
+        char buffer[snprintf(NULL, 0, format "\n", ##__VA_ARGS__) + 1] = {0};      \
+        sprintf(buffer, format "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
+        Serial.print(buffer);                                                      \
     }
 #else // SERIAL_DEBUG_PRINT_ENABLE
 #define sbprintlf(format, ...) \
