@@ -16,7 +16,7 @@
 #include "meb_print_serial.h"
 
 // The program loop is guaranteed to run at most this many times per second.
-#define MAX_FREQUENCY 4
+#define MAX_FREQUENCY 8
 
 /// SENSOR USAGE CONDITIONALS
 // #define USING_MLX90393
@@ -31,7 +31,15 @@
 // LENGTH CANNOT EXCEED 254 (255 - 1) due to uint8_t limits.
 #define ACC_DATA_LEN 210 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
 // How many samples do we average together before moving on?
-#define ACC_AVG_SAMP MAX_FREQUENCY
+#define ACC_AVG_SAMP MAX_FREQUENCY/2 // MAX_FREQUENCY/2 means we record a value every half second (105 seconds rec. time).
+
+// An event is declared ON if _ON_NUM-many samples exceed the threshold out of the last _CONSIDER_NUM-many samples.
+// An event is declared OFF if _OFF_NUM-many samples do not exceed the threshold out of the last _CONSIDER_NUM-many samples.
+#define ACC_EVENT_CONSIDER_NUM 10
+#define ACC_EVENT_ON_NUM 6
+#define ACC_EVENT_OFF_NUM 6
+// How many samples are considered protected/recorded prior to declaration of an event?
+#define ACC_EVENT_BACKLOG 15
 
 /////////////////////////////////
 /// SENSOR-SPECIFIC CONSTANTS ///
@@ -710,6 +718,8 @@ uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURP
 uint8_t overwrite_deny_start = ACC_DATA_LEN + 1;
 uint8_t overwrite_deny_end = ACC_DATA_LEN + 1;
 uint8_t accel_event = 0;
+// The threshold where an event is declared and recording begins.
+uint16_t acc_event_threshold = 0;
 void loop()
 {
     // Mark the beginning of the loop.
@@ -736,6 +746,16 @@ void loop()
         // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
         acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
 
+        // NOTE: The data coming out of the MPU6000 is in 16-bit uints.
+        // Therefore, 
+        // values >32767 are a measure towards 0 from 4.
+        // values <=32767 are a measure from 0 towards -4.
+        // Therefore,
+        // if (acc_xyz[i] > 32767)
+        //     acc_xyz_f[i] = 4.f - (((float)acc_xyz[i]) / (16384.f));
+        // else
+        //     acc_xyz_f[i] = 0.f - (((float)acc_xyz[i]) / (16384.f));
+
         // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
         // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
         // UNTRANSMITTED RECORDED data is marked by the overwrite_deny_start and overwrite_deny_end bounds.
@@ -747,6 +767,8 @@ void loop()
                 // We just reached, while RECORDING, the beginning of the UNTRANSMITTED RECORDED data section.
                 // TODO: Determine what we do; do we overwrite old data or cancel the event recording?
             }
+
+            // TODO: Determine what criteria results in 'falling out' of an event.
         }
         else
         { // Not currently experiencing an accelerometer event.
@@ -754,22 +776,32 @@ void loop()
             {
                 // We just reached, while SAMPLING, the beginning of the UNTRANSMITTED RECORDED data section.
                 // We should skip over this area and continue sampling.
-                acc_i += overwrite_deny_end * ACC_AVG_SAMP;
+                acc_i = ((overwrite_deny_end + 1) % ACC_DATA_LEN) * ACC_AVG_SAMP;
+            }
+
+            // TODO: Determine what criteria results in declaring an event.
+            // Event determination.
+            
+            // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0...
+            uint8_t i = 0;
+            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_CONSIDER_NUM)
+            {
+                i = ACC_DATA_LEN - (ACC_EVENT_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP))
+            }
+            else
+            {
+                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_CONSIDER_NUM;
+            }
+
+            uint8_t event_qualifiers = 0;
+            for (; i < (acc_i/ACC_AVG_SAMP); i++)
+            {
+                // TODO: Detect threshold violation.
             }
         }
 
-        if (overwrite_deny_start < overwrite_deny_end)
-        { // OOOOOOO|XXXXXXXX|OOO
-
-        }
-        else if (overwrite_deny_start > overwrite_deny_end)
-        { // XXX|OOOOOOOOOOO|XXXX
-
-        }
-        else
-        {
-            // _start == _end
-        }
+        // OOOOOOO|XXXXXXXX|OOO
+        // XXX|OOOOOOOOOOO|XXXX
 
         // Declare I2C read/write buffers.
         uint8_t wr_buf[1] = {0};
@@ -779,13 +811,6 @@ void loop()
         wr_buf[0] = MPU6000_ACCEL_OUT; // For some reason we can get all six registers of accel. data (0x3B - 0x40) just by querying the first one.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
 
-        // sbprintlf("0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X", rd_buf[0], rd_buf[1], rd_buf[2], rd_buf[3], rd_buf[4], rd_buf[5]);
-
-        // Convert the data to a usable format.
-        // acc_data[acc_i].x = rd_buf[0] << 8 | rd_buf[1];
-        // acc_data[acc_i].y = rd_buf[2] << 8 | rd_buf[3];
-        // acc_data[acc_i].z = rd_buf[4] << 8 | rd_buf[5];
-
         // Converts the data into a usable format, then averages and stores the newly rolling-averaged data into the data array.
         // To calculate the new average after the Nth number, it multiplies the old average by N - 1, adds the new values, and divides this total by N; N is acc_i + 1.
         // "rd_buf[4] << 8 | rd_buf[5]" is the process by which the data is converted into useful values.
@@ -793,40 +818,11 @@ void loop()
         acc_data[(acc_i/ACC_AVG_SAMP)].y = (int)((((acc_data[(acc_i/ACC_AVG_SAMP)].x) * (acc_i/ACC_AVG_SAMP)) + (rd_buf[2] << 8 | rd_buf[3])) / ((acc_i/ACC_AVG_SAMP) + 1));
         acc_data[(acc_i/ACC_AVG_SAMP)].z = (int)((((acc_data[(acc_i/ACC_AVG_SAMP)].x) * (acc_i/ACC_AVG_SAMP)) + (rd_buf[4] << 8 | rd_buf[5])) / ((acc_i/ACC_AVG_SAMP) + 1));
 
-        // int16_t acc_xyz[3] = {0};
-        // acc_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
-        // acc_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
-        // acc_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
-
-//        static int16_t x_max, y_max, z_max;
-//        static int16_t x_del, y_del, z_del;
-//        static int16_t z_max
-
         Serial.print(acc_data[acc_i/ACC_AVG_SAMP].x);
         Serial.print(" ");
         Serial.print(acc_data[acc_i/ACC_AVG_SAMP].y);
         Serial.print(" ");
         Serial.print(acc_data[acc_i/ACC_AVG_SAMP].z);
-
-        // sbprintlf("[MPU6000] Accel. XYZ (raw): %d %d %d", acc_xyz[0], acc_xyz[1], acc_xyz[2]);
-
-/*         // Convert to float and map properly.
-        float acc_xyz_f[3] = {0};
-        for (int i = 0; i < 3; i++)
-        {
-            if (acc_xyz[i] > 32767)
-                acc_xyz_f[i] = 4.f - (((float)acc_xyz[i]) / (16384.f));
-            else
-                acc_xyz_f[i] = 0.f - (((float)acc_xyz[i]) / (16384.f));
-        }
-        // Arduino's snprintf does not support floats!
-        // sbprintlf("[MPU6000] Accel. XYZ (g): %.03f %.03f %.03f", acc_xyz_f[0], acc_xyz_f[1], acc_xyz_f[2]);
-        Serial.print("[MPU6000] Accel. XYZ (g): ");
-        Serial.print(acc_xyz_f[0]);
-        Serial.print(" ");
-        Serial.print(acc_xyz_f[1]);
-        Serial.print(" ");
-        Serial.println(acc_xyz_f[2]); */
     }
 #endif // USING_MPU6000
 
