@@ -11,12 +11,12 @@
 
 #include <Wire.h>
 
-#define SERIAL_DEBUG_PRINT_ENABLE // Allows sbprintlf(...) & sdbprintf(...) printouts if defined.
+#define SERIAL_DEBUG_PRINT_ENABLE // Allows // sbprintlf(...) & sdbprintf(...) printouts if defined.
 
-#include "meb_print_serial.h"
+// #include "meb_print_serial.h"
 
 // The program loop is guaranteed to run at most this many times per second.
-#define MAX_FREQUENCY 8
+#define MAX_FREQUENCY ((uint8_t)(60)) // 60
 
 /// SENSOR USAGE CONDITIONALS
 // #define USING_MLX90393
@@ -31,15 +31,20 @@
 // LENGTH CANNOT EXCEED 254 (255 - 1) due to uint8_t limits.
 #define ACC_DATA_LEN 210 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
 // How many samples do we average together before moving on?
-#define ACC_AVG_SAMP MAX_FREQUENCY/2 // MAX_FREQUENCY/2 means we record a value every half second (105 seconds rec. time).
+#define ACC_AVG_SAMP ((uint8_t)(3)) // 10 // How many samples go into each average.
 
-// An event is declared ON if _ON_NUM-many samples exceed the threshold out of the last _CONSIDER_NUM-many samples.
-// An event is declared OFF if _OFF_NUM-many samples do not exceed the threshold out of the last _CONSIDER_NUM-many samples.
-#define ACC_EVENT_CONSIDER_NUM 10
-#define ACC_EVENT_ON_NUM 6
-#define ACC_EVENT_OFF_NUM 3
+
+// Event ACTIVE if >=ACC_EVENT_ON_NUM of the last ACC_EVENT_ON_CONSIDER_NUM averages exceed the threshold.
+// Event INACTIVE if >=ACC_EVENT_OFF_NUM of the last ACC_EVENT_ON_CONSIDER_NUM averages do not exceed the threshold.
+#define ACC_EVENT_ON_CONSIDER_NUM 10
+#define ACC_EVENT_ON_NUM 1
+#define ACC_EVENT_OFF_CONSIDER_NUM 20
+#define ACC_EVENT_OFF_NUM 20
+
 // How many samples are considered protected/recorded prior to declaration of an event?
-#define ACC_EVENT_BACKLOG 15
+#define ACC_EVENT_BACKLOG 30
+
+#define ACC_RECALIBRATE ((uint8_t)(32))
 
 /////////////////////////////////
 /// SENSOR-SPECIFIC CONSTANTS ///
@@ -189,10 +194,10 @@
 // This type is used for storing processed accelerometer data into the acc_data array. Note: Processed meaning rolling averaged.
 typedef struct
 {
-    uint16_t x;
-    uint16_t y;
-    uint16_t z;
-} acc_data_t;
+    int16_t x;
+    int16_t y;
+    int16_t z;
+} int16_3_t;
 
 /**
  * @brief Writes slave device and register addresses.
@@ -400,7 +405,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-//            sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
+//            // sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
         
         // TODO: Settings resolutions of X, Y, and Z axes may be combinable (same register).
@@ -421,7 +426,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
@@ -441,7 +446,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
@@ -461,7 +466,7 @@ void setup()
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
 
-//            sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
+//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
@@ -557,13 +562,13 @@ void setup()
         wr_buf[0] = MPU6000_WHO_AM_I;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        //sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
+        //// sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
 //        Serial.print("WhoAmI: ");
 //        Serial.println(rd_buf[0], HEX);
 
         if (rd_buf[0] != ADDR_MPU6000)
         {
-            sbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
+            // sbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
             exit(1);
         }
 
@@ -572,7 +577,7 @@ void setup()
         wr_buf[1] = 0x0;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-//        sbprintlf("Sent wake-up command.");
+//        // sbprintlf("Sent wake-up command.");
 
         /* NOTE: We may not want to do this if it changes the value of the wake-up register bit. May not be necessary.
         // Begin resetting of all registers to defaults.
@@ -580,7 +585,7 @@ void setup()
         wr_buf[1] = 0b10000000;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sbprintlf("Send reset-all-registers command."); */
+        // sbprintlf("Send reset-all-registers command."); */
 
         /* NOTE: Uncomment after testing.
         // Reset analog and digital signal paths of the gyro, accel, and temp sensors.
@@ -588,7 +593,7 @@ void setup()
         wr_buf[1] = 0b00000111;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sbprintlf("Reset analog and digital signal paths of the gyroscope, accelerometer, and temperature sensors."); */
+        // sbprintlf("Reset analog and digital signal paths of the gyroscope, accelerometer, and temperature sensors."); */
 
         // Set to -2G to 2G range.
         wr_buf[0] = MPU6000_ACCEL_CONFIG;
@@ -598,11 +603,11 @@ void setup()
         // Check to see if the range is set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("Set range to +-%dG (across %d gs). Register reads: 0x%02X", wr_buf[1]/2, wr_buf[1], rd_buf[0]);
+        // sbprintlf("Set range to +-%dG (across %d gs). Register reads: 0x%02X", wr_buf[1]/2, wr_buf[1], rd_buf[0]);
 
         if (rd_buf[0] != wr_buf[1])
         {
-            sbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
+            // sbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
             exit(1);
         }
 
@@ -616,7 +621,7 @@ void setup()
         // Check to see if the sample rate was set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("Set sample rate divisor. Register reads: 0x%02X", rd_buf[0]); */
+        // sbprintlf("Set sample rate divisor. Register reads: 0x%02X", rd_buf[0]); */
 
         /* NOTE: Uncomment after testing.
         // Set filter bandwidth.
@@ -624,19 +629,19 @@ void setup()
         wr_buf[0] = MPU6000_CONFIG;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("Read CONFIG register as: 0x%02X", rd_buf[0]);
+        // sbprintlf("Read CONFIG register as: 0x%02X", rd_buf[0]);
 
         // We want the register to be DDDDD000, where Ds are don't-cares.
         // Therefore, we must take the current register value, and bitwise AND it with the result of 0b11111000 (DDDDD000) bitwise ORed with our desired band value.
         wr_buf[1] = rd_buf[0] & (0b11111000 | MPU6000_BAND_260_HZ);
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
 
-        sbprintlf("Attempted to set CONFIG register to: 0x%02X", wr_buf[1]);
+        // sbprintlf("Attempted to set CONFIG register to: 0x%02X", wr_buf[1]);
 
         // Check to make sure we set the register correctly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("CONFIG register now reads as: 0x%02X", rd_buf[0]); */
+        // sbprintlf("CONFIG register now reads as: 0x%02X", rd_buf[0]); */
         
         /* NOTE: Uncomment after testing. 
         // Select PLL with X axis gyroscope reference as our clock (defaults to internal oscillator).
@@ -647,9 +652,9 @@ void setup()
         // Ensure PWR_MGMT_1 was set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        sbprintlf("PWR_MGMT_1 register reads: 0x%02X", rd_buf[0]); */
+        // sbprintlf("PWR_MGMT_1 register reads: 0x%02X", rd_buf[0]); */
 
-        sbprintlf("MPU6000 boot complete."); 
+        // sbprintlf("MPU6000 boot complete."); 
     }
 #endif // USING_MPU6000
 
@@ -709,7 +714,7 @@ void setup()
 #endif // USING_SX1272
 }
 
-acc_data_t acc_data[ACC_DATA_LEN];
+int16_3_t acc_data[ACC_DATA_LEN];
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 255, use uint8_t.
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 65535, use uint16_t.
 uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURPOSES ONLY! DO NOT MISUSE.
@@ -717,13 +722,20 @@ uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURP
 // If we are currently recording an 'event,' this will be set to the beginning index and end index of the data recorded during the event. New data recorded should not overwrite this.
 uint8_t overwrite_deny_start = ACC_DATA_LEN + 1;
 uint8_t overwrite_deny_end = ACC_DATA_LEN + 1;
-uint8_t accel_event = 2;
+uint8_t accel_event = 0;
+uint8_t last_avgd_i = 0;
 // The threshold where an event is declared and recording begins.
 // The threshold is determined by, at startup, 
 // (1) filling an entire buffer full of accelerometer data
 // (2) determining the average value for all values 0
 // (3) multiplying (2) by 1.5
-acc_data_t acc_event_threshold;
+int16_3_t acc_calib_mean = { .x = 0, .y = 0, .z = 0 };;
+int16_3_t acc_event_threshold = { .x = 0, .y = 0, .z = 0 };;
+int16_3_t acc_calib_max = { .x = -32768, .y = -32768, .z = -32768 };
+int16_3_t acc_calib_min = { .x = 32767, .y = 32767, .z = 32767};
+// int16_3_t std_dev = { .x = 0, .y = 0, .z = 0 };
+int16_3_t curr_val = { .x = 0, .y = 0, .z = 0 };
+uint8_t acc_loop_count = 0;
 void loop()
 {
     // Mark the beginning of the loop.
@@ -747,10 +759,57 @@ void loop()
     // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
     {   
-        // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
-        acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
+        if ((acc_i/ACC_AVG_SAMP) == 0)
+        {
+            // Recalibrate every ACC_RECALIBRATE times we fill the array.
+            if (acc_loop_count == 0)
+            {
+                accel_event = 2;
+            }
+
+            acc_loop_count = (acc_loop_count + 1) % ACC_RECALIBRATE;
+        }
 
         // NOTE: The data coming out of the MPU6000 is in a weird 16-bit format. Performing the (rd_buf[0] << 8 | rd_buf[1]) operation on each X, Y, and Z element converts it into int16_t.
+
+        /////////////////////
+        // DATA COLLECTION //
+        /////////////////////
+
+        // Declare I2C read/write buffers.
+        uint8_t wr_buf[1] = {0};
+        uint8_t rd_buf[6] = {0};
+
+        // Request six bytes of accelerometer data.
+        wr_buf[0] = MPU6000_ACCEL_OUT; // For some reason we can get all six registers of accel. data (0x3B - 0x40) just by querying the first one.
+        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
+
+        // Converts the raw data into int16_t, ensures its positive, then rolling-averages it with the data in the current index.
+        curr_val.x = (rd_buf[0] << 8 | rd_buf[1]);
+        if (curr_val.x < 0) { curr_val.x *= -1; }
+        Serial.print("I_X:");
+        Serial.print(curr_val.x);
+        Serial.print(" ");
+        // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+        acc_data[(acc_i/ACC_AVG_SAMP)].x = acc_data[(acc_i/ACC_AVG_SAMP)].x + ( ( curr_val.x - acc_data[(acc_i/ACC_AVG_SAMP)].x ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+
+        curr_val.y = (rd_buf[2] << 8 | rd_buf[3]);
+        if (curr_val.y < 0) { curr_val.y *= -1; }
+        // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+        acc_data[(acc_i/ACC_AVG_SAMP)].y = acc_data[(acc_i/ACC_AVG_SAMP)].y + ( ( curr_val.y - acc_data[(acc_i/ACC_AVG_SAMP)].y ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+
+        curr_val.z = (rd_buf[4] << 8 | rd_buf[5]);
+        if (curr_val.z < 0) { curr_val.z *= -1; }
+        // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+        acc_data[(acc_i/ACC_AVG_SAMP)].z = acc_data[(acc_i/ACC_AVG_SAMP)].z + ( ( curr_val.z - acc_data[(acc_i/ACC_AVG_SAMP)].z ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+
+        ////////////////////
+        // EVENT HANDLING //
+        ////////////////////
+
+        Serial.print("Event:");
+        Serial.print(3000 + (accel_event * 1000));
+        Serial.print(" ");
 
         // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
         // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
@@ -769,27 +828,35 @@ void loop()
 
             // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0, make it loop properly.
             uint8_t i = 0;
-            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_CONSIDER_NUM)
+            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_OFF_CONSIDER_NUM)
             {
-                i = ACC_DATA_LEN - (ACC_EVENT_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
+                i = ACC_DATA_LEN - (ACC_EVENT_OFF_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
             }
             else
             {
-                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_CONSIDER_NUM;
+                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_CONSIDER_NUM;
             }
 
             uint8_t event_qualifiers = 0;
             for (; i < (acc_i/ACC_AVG_SAMP); i++)
             {
                 // Detect threshold violations.
-                if (acc_data[i].x > acc_event_threshold.x
-                 || acc_data[i].y > acc_event_threshold.y
-                 || acc_data[i].z > acc_event_threshold.z)
+                if (acc_data[i].x < acc_calib_mean.x + acc_event_threshold.x
+                 && acc_data[i].y < acc_calib_mean.y + acc_event_threshold.y
+                 && acc_data[i].z < acc_calib_mean.z + acc_event_threshold.z
+                 && acc_data[i].x > acc_calib_mean.x - acc_event_threshold.x
+                 && acc_data[i].y > acc_calib_mean.y - acc_event_threshold.y
+                 && acc_data[i].z > acc_calib_mean.z - acc_event_threshold.z)
                 {
                     event_qualifiers++;
                 }
             }
-            if (event_qualifiers < ACC_EVENT_OFF_NUM)
+
+            Serial.print("E1_Q:");
+            Serial.print(3000 + (event_qualifiers * 10));
+            Serial.print(" ");
+
+            if (event_qualifiers >= ACC_EVENT_OFF_NUM)
             {
                 accel_event = 0;
             }
@@ -808,87 +875,164 @@ void loop()
             
             // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0, make it loop properly.
             uint8_t i = 0;
-            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_CONSIDER_NUM)
+            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_ON_CONSIDER_NUM)
             {
-                i = ACC_DATA_LEN - (ACC_EVENT_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
+                i = ACC_DATA_LEN - (ACC_EVENT_ON_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
             }
             else
             {
-                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_CONSIDER_NUM;
+                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_ON_CONSIDER_NUM;
             }
 
             uint8_t event_qualifiers = 0;
             for (; i < (acc_i/ACC_AVG_SAMP); i++)
             {
                 // Detect threshold violations.
-                if (acc_data[i].x > acc_event_threshold.x
-                 || acc_data[i].y > acc_event_threshold.y
-                 || acc_data[i].z > acc_event_threshold.z)
+                if (acc_data[i].x > acc_calib_mean.x + acc_event_threshold.x
+                 || acc_data[i].y > acc_calib_mean.y + acc_event_threshold.y
+                 || acc_data[i].z > acc_calib_mean.z + acc_event_threshold.z
+                 || acc_data[i].x < acc_calib_mean.x - acc_event_threshold.x
+                 || acc_data[i].y < acc_calib_mean.y - acc_event_threshold.y
+                 || acc_data[i].z < acc_calib_mean.z - acc_event_threshold.z)
                 {
                     event_qualifiers++;
                 }
             }
-            if (event_qualifiers > ACC_EVENT_ON_NUM)
+
+            Serial.print("E0_Q:");
+            Serial.print(3000 + (event_qualifiers * 10));
+            Serial.print(" ");
+
+            if (event_qualifiers >= ACC_EVENT_ON_NUM)
             {
                 accel_event = 1;
             }
         }
         else if (accel_event == 2) // Lunar Noise Calibration Required
         {   
-            if (acc_i/ACC_AVG_SAMP >= ACC_DATA_LEN-2)
+            if (acc_i/ACC_AVG_SAMP >= ACC_DATA_LEN-1)
             {
                 // Once we fill the buffer, set accel_event from CALIBRATE to FALSE,
                 // and set the thresholds to our average acceleration magnitude * 1.5.
+                // Calculate poor man's standard deviation. std_dev.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 4);
                 accel_event = 0;
-                acc_event_threshold.x = acc_data[ACC_DATA_LEN-1].x * 1.5;
-                acc_event_threshold.y = acc_data[ACC_DATA_LEN-1].y * 1.5;
-                acc_event_threshold.z = acc_data[ACC_DATA_LEN-1].z * 1.5;
+                acc_event_threshold.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 1);
+                acc_event_threshold.y = (int16_t)((acc_calib_max.y - acc_calib_min.y) / 1);
+                acc_event_threshold.z = (int16_t)((acc_calib_max.z - acc_calib_min.z) / 1);
             }
             else if ((acc_i%ACC_AVG_SAMP) == 0)
             { // This ensures that we only add to the array average once the index average has been taken. 
               // acc_data[(acc_i/ACC_AVG_SAMP)-1].x should ensure we take the previously averaged one once we move on.
                 // Keep a rolling average of collected data in the last index as we go.
-                // Both of the following are confirmed valid:
-                // NewAvg = ((OldAvg * NumOldValues) + NewValue) / (NumOldValues + 1)
-                // NewAvg = OldAvg + ((NewValue - OldAvg)/ (NumOldValues + 1))
-                acc_data[ACC_DATA_LEN-1].x = acc_data[ACC_DATA_LEN-1].x + ((acc_data[(acc_i/ACC_AVG_SAMP)-1].x) - acc_data[ACC_DATA_LEN-1].x)/((acc_i/ACC_AVG_SAMP) + 1);
-                acc_data[ACC_DATA_LEN-1].y = acc_data[ACC_DATA_LEN-1].y + ((acc_data[(acc_i/ACC_AVG_SAMP)-1].y) - acc_data[ACC_DATA_LEN-1].y)/((acc_i/ACC_AVG_SAMP) + 1);
-                acc_data[ACC_DATA_LEN-1].z = acc_data[ACC_DATA_LEN-1].z + ((acc_data[(acc_i/ACC_AVG_SAMP)-1].z) - acc_data[ACC_DATA_LEN-1].z)/((acc_i/ACC_AVG_SAMP) + 1);
+                
+                // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+                acc_calib_mean.x = acc_calib_mean.x + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1].x - acc_calib_mean.x ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
+                acc_calib_mean.y = acc_calib_mean.y + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1].y - acc_calib_mean.y ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
+                acc_calib_mean.z = acc_calib_mean.z + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1].z - acc_calib_mean.z ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
+
+                // Keep track of min/max during calibration.
+                // TODO: Maybe when a new max is discovered, set the max to the average of the OldMax and NewMax.
+                if (curr_val.x > acc_calib_max.x)
+                {
+                    acc_calib_max.x = curr_val.x;
+                    // acc_calib_max.x = (int16_t)((acc_calib_max.x + curr_val.x) / 2);
+                }
+                else if (curr_val.x < acc_calib_min.x)
+                {
+                    acc_calib_min.x = curr_val.x;
+                    // acc_calib_min.x = (int16_t)((acc_calib_min.x + curr_val.x) / 2);
+                }
+                if (curr_val.y > acc_calib_max.y)
+                {
+                    acc_calib_max.y = curr_val.y;
+                }
+                else if (curr_val.y < acc_calib_min.y)
+                {
+                    acc_calib_min.y = curr_val.y;
+                }
+                if (curr_val.z > acc_calib_max.z)
+                {
+                    acc_calib_max.z = curr_val.z;
+                }
+                else if (curr_val.z < acc_calib_min.z)
+                {
+                    acc_calib_min.z = curr_val.z;
+                }
             }
         }
 
         // OOOOOOO|XXXXXXXX|OOO
         // XXX|OOOOOOOOOOO|XXXX
 
-        // Declare I2C read/write buffers.
-        uint8_t wr_buf[1] = {0};
-        uint8_t rd_buf[6] = {0};
+        uint8_t idx = 0;
+        if (acc_i/ACC_AVG_SAMP == 0)
+        {
+            idx = ACC_DATA_LEN - 1;
+        }
+        else
+        {
+            idx = (acc_i/ACC_AVG_SAMP) - 1;
+        }
 
-        // Request six bytes of accelerometer data.
-        wr_buf[0] = MPU6000_ACCEL_OUT; // For some reason we can get all six registers of accel. data (0x3B - 0x40) just by querying the first one.
-        i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 6);
+        if (accel_event != 2 && ((acc_i%ACC_AVG_SAMP) == 0))
+        {
+            // Adjust the calibrated mean to follow the changing trends.
+            if (acc_data[idx].x > acc_calib_mean.x)
+            {
+                acc_calib_mean.x += ((acc_data[idx].x - acc_calib_mean.x) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
+            else if (acc_data[idx].x < acc_calib_mean.x)
+            {
+                acc_calib_mean.x -= ((acc_calib_mean.x - acc_data[idx].x) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
 
-        // Converts the raw data into int16_t, ensures its positive, then rolling-averages it with the data in the current index.
-        // Both of the following are confirmed valid:
-        // NewAvg = ((OldAvg * NumOldValues) + NewValue) / (NumOldValues + 1)
-        // NewAvg = OldAvg + ((NewValue - OldAvg)/ (NumOldValues + 1))
-        int16_t temp = (rd_buf[0] << 8 | rd_buf[1]);
-        if (temp < 0) { temp *= -1; }
-        acc_data[(acc_i/ACC_AVG_SAMP)].x = (acc_data[(acc_i/ACC_AVG_SAMP)].x) + ((temp - (acc_data[(acc_i/ACC_AVG_SAMP)].x))/((acc_i%ACC_AVG_SAMP) + 1));
+            if (acc_data[idx].y > acc_calib_mean.y)
+            {
+                acc_calib_mean.y += ((acc_data[idx].y - acc_calib_mean.y) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
+            else if (acc_data[idx].y < acc_calib_mean.y)
+            {
+                acc_calib_mean.y -= ((acc_calib_mean.y - acc_data[idx].y) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
 
-        temp = (rd_buf[2] << 8 | rd_buf[3]);
-        if (temp < 0) { temp *= -1; }
-        acc_data[(acc_i/ACC_AVG_SAMP)].y = (acc_data[(acc_i/ACC_AVG_SAMP)].y) + ((temp - (acc_data[(acc_i/ACC_AVG_SAMP)].y))/((acc_i%ACC_AVG_SAMP) + 1));
+            if (acc_data[idx].z > acc_calib_mean.z)
+            {
+                acc_calib_mean.z += ((acc_data[idx].z - acc_calib_mean.z) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
+            else if (acc_data[idx].z < acc_calib_mean.z)
+            {
+                acc_calib_mean.z -= ((acc_calib_mean.z - acc_data[idx].z) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+            }
+        }
 
-        temp = (rd_buf[4] << 8 | rd_buf[5]);
-        if (temp < 0) { temp *= -1; }
-        acc_data[(acc_i/ACC_AVG_SAMP)].z = (acc_data[(acc_i/ACC_AVG_SAMP)].z) + ((temp - (acc_data[(acc_i/ACC_AVG_SAMP)].z))/((acc_i%ACC_AVG_SAMP) + 1));
+        // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
+        acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
 
-        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].x);
+        Serial.print("A_X:");
+        Serial.print(acc_data[idx].x);
         Serial.print(" ");
-        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].y);
+
+        Serial.print("MEAN:");
+        Serial.print(acc_calib_mean.x);
         Serial.print(" ");
-        Serial.print(acc_data[acc_i/ACC_AVG_SAMP].z);
+
+        Serial.print("MEAN_P:");
+        Serial.print(acc_calib_mean.x + acc_event_threshold.x);
+        Serial.print(" ");
+
+        Serial.print("MEAN_M:");
+        Serial.print(acc_calib_mean.x - acc_event_threshold.x);
+        Serial.print(" ");
+
+        Serial.print("MAX:");
+        Serial.print(acc_calib_max.x);
+        Serial.print(" ");
+        
+        Serial.print("MIN:");
+        Serial.print(acc_calib_min.x);
+        Serial.print(" ");
+
+        Serial.print("\n");
     }
 #endif // USING_MPU6000
 
@@ -909,7 +1053,7 @@ void loop()
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
 
-        // sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
+        // // sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
     }
 #endif // USING_MPU6000
 
@@ -927,7 +1071,7 @@ void loop()
         // Convert the data to a usable format.
         uint16_t temp = rd_buf[0] << 8 | rd_buf[1];
 
-        // sbprintlf("[MPU6000] Temp. (raw): %d", temp);
+        // // sbprintlf("[MPU6000] Temp. (raw): %d", temp);
     }
 #endif // USING_MPU6000
     
@@ -944,7 +1088,7 @@ void loop()
         // Convert to degrees C.
         float temp = (rd_buf[0] << 8 | rd_buf[1]) * TMP117_RESOLUTION;
 
-        sbprintlf("[TMP117] Temp. (degC): %.06f", temp);
+        // sbprintlf("[TMP117] Temp. (degC): %.06f", temp);
     }
 #endif // USING_TMP117
     
