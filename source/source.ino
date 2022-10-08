@@ -1,7 +1,7 @@
 /**
  * @file source.ino
  * @author Mit Bailey (mitbailey99@gmail.com)
- * @brief
+ * @brief Flight software for LunaSat.
  * @version See Git tags for version information.
  * @date 2022.03.25
  *
@@ -11,7 +11,7 @@
 
 #include <Wire.h>
 
-#define SERIAL_DEBUG_PRINT_ENABLE // Allows // sbprintlf(...) & sdbprintf(...) printouts if defined.
+#define SERIAL_PRINT_EN // Enables printouts.
 
 // #include "meb_print_serial.h"
 
@@ -46,9 +46,9 @@
 
 #define ACC_RECALIBRATE ((uint8_t)(32))
 
-/////////////////////////////////
-/// SENSOR-SPECIFIC CONSTANTS ///
-/////////////////////////////////
+///////////////////////////////
+// SENSOR-SPECIFIC CONSTANTS //
+///////////////////////////////
 
 #define ADDR_MLX90393 0x0C
 #define ADDR_MPU6000 0x68
@@ -370,9 +370,9 @@ void setup()
     // NOTE: Setup sequences taken from the basic setup examples found in: 
     //       github.com/GLEE2023/GLEE2023/examples/Sensor_Examples
 
-#ifdef SERIAL_DEBUG_PRINT_ENABLE
+#ifdef SERIAL_PRINT_EN
     Serial.begin(9600);
-#endif // SERIAL_DEBUG_PRINT_ENABLE
+#endif // SERIAL_PRINT_EN
 
     Wire.begin();
     Wire.setClock(100000);
@@ -404,8 +404,6 @@ void setup()
             // Simultaneously sets the CONF1 register and retrieves status byte.
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
-
-//            // sbprintlf("Set gain, status byte: 0x%02X", rd_buf[0]);
         }
         
         // TODO: Settings resolutions of X, Y, and Z axes may be combinable (same register).
@@ -425,8 +423,6 @@ void setup()
 
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
-
-//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Y, MLX90393_RES_19);
@@ -445,8 +441,6 @@ void setup()
 
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
-
-//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setResolution(MLX90393_Z, MLX90393_RES_16);
@@ -465,8 +459,6 @@ void setup()
 
             wr_buf[0] = MLX90393_REG_WR;
             i2cbus_transfer(ADDR_MLX90393, wr_buf, 4, rd_buf, 1);
-
-//            // sbprintlf("Set resolution, status byte: 0x%02X", rd_buf[0]);
         }
 
         // inplaceof: magnetometer.setOversampling(MLX90393_OSR_2);
@@ -553,7 +545,7 @@ void setup()
 #ifdef USING_MPU6000
     // MPU6000 initialization and setup.
     {    
-        // TODO: See sketch_apr04a.cpp for how to properly read and write with MPU6050.
+        // NOTE: See sketch_apr04a.cpp for how to properly read and write with MPU6050.
         // Declare our I2C write and read buffers.
         uint8_t wr_buf[2] = {0};
         uint8_t rd_buf[2] = {0};
@@ -562,13 +554,11 @@ void setup()
         wr_buf[0] = MPU6000_WHO_AM_I;
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        //// sbprintlf("WhoAmI register: 0x%02X", rd_buf[0]);
-//        Serial.print("WhoAmI: ");
-//        Serial.println(rd_buf[0], HEX);
+        // Serial.print("WhoAmI: ");
+        // Serial.println(rd_buf[0], HEX);
 
         if (rd_buf[0] != ADDR_MPU6000)
         {
-            // sbprintlf("FATAL: MPU6000's WHO_AM_I register reports incorrect value.");
             exit(1);
         }
 
@@ -576,8 +566,6 @@ void setup()
         wr_buf[0] = MPU6000_PWR_MGMT_1;
         wr_buf[1] = 0x0;
         i2cbus_write(ADDR_MPU6000, wr_buf, 2);
-
-//        // sbprintlf("Sent wake-up command.");
 
         /* NOTE: We may not want to do this if it changes the value of the wake-up register bit. May not be necessary.
         // Begin resetting of all registers to defaults.
@@ -603,11 +591,8 @@ void setup()
         // Check to see if the range is set properly.
         i2cbus_transfer(ADDR_MPU6000, wr_buf, 1, rd_buf, 1);
 
-        // sbprintlf("Set range to +-%dG (across %d gs). Register reads: 0x%02X", wr_buf[1]/2, wr_buf[1], rd_buf[0]);
-
         if (rd_buf[0] != wr_buf[1])
         {
-            // sbprintlf("FATAL: MPU6000's ACCEL_CONFIG register failed to be written to.");
             exit(1);
         }
 
@@ -715,27 +700,28 @@ void setup()
 }
 
 int16_3_t acc_data[ACC_DATA_LEN];
+
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 255, use uint8_t.
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 65535, use uint16_t.
 uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURPOSES ONLY! DO NOT MISUSE.
-// uint32_t time = 0;
+
 // If we are currently recording an 'event,' this will be set to the beginning index and end index of the data recorded during the event. New data recorded should not overwrite this.
 uint8_t overwrite_deny_start = ACC_DATA_LEN + 1;
 uint8_t overwrite_deny_end = ACC_DATA_LEN + 1;
-uint8_t accel_event = 0;
-uint8_t last_avgd_i = 0;
+uint8_t accel_event = 0; // 0 = No Event; 1 = Event; 2 = Recalibration
+
 // The threshold where an event is declared and recording begins.
 // The threshold is determined by, at startup, 
 // (1) filling an entire buffer full of accelerometer data
 // (2) determining the average value for all values 0
 // (3) multiplying (2) by 1.5
-int16_3_t acc_calib_mean = { .x = 0, .y = 0, .z = 0 };;
 int16_3_t acc_event_threshold = { .x = 0, .y = 0, .z = 0 };;
+int16_3_t acc_calib_mean = { .x = 0, .y = 0, .z = 0 };;
 int16_3_t acc_calib_max = { .x = -32768, .y = -32768, .z = -32768 };
 int16_3_t acc_calib_min = { .x = 32767, .y = 32767, .z = 32767};
-// int16_3_t std_dev = { .x = 0, .y = 0, .z = 0 };
 int16_3_t curr_val = { .x = 0, .y = 0, .z = 0 };
 uint8_t acc_loop_count = 0;
+
 void loop()
 {
     // Mark the beginning of the loop.
@@ -758,13 +744,16 @@ void loop()
 
     // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
-    {   
+    {      
+        // We have looped back to the zeroth element of the circular buffer.
         if ((acc_i/ACC_AVG_SAMP) == 0)
         {
             // Recalibrate every ACC_RECALIBRATE times we fill the array.
             if (acc_loop_count == 0)
             {
                 accel_event = 2;
+                acc_calib_max = { .x = -32768, .y = -32768, .z = -32768 };
+                acc_calib_min = { .x = 32767, .y = 32767, .z = 32767};
             }
 
             acc_loop_count = (acc_loop_count + 1) % ACC_RECALIBRATE;
@@ -787,9 +776,11 @@ void loop()
         // Converts the raw data into int16_t, ensures its positive, then rolling-averages it with the data in the current index.
         curr_val.x = (rd_buf[0] << 8 | rd_buf[1]);
         if (curr_val.x < 0) { curr_val.x *= -1; }
+#ifdef SERIAL_PRINT_EN
         Serial.print("I_X:");
         Serial.print(curr_val.x);
         Serial.print(" ");
+#endif // SERIAL_PRINT_EN
         // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
         acc_data[(acc_i/ACC_AVG_SAMP)].x = acc_data[(acc_i/ACC_AVG_SAMP)].x + ( ( curr_val.x - acc_data[(acc_i/ACC_AVG_SAMP)].x ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
 
@@ -807,9 +798,13 @@ void loop()
         // EVENT HANDLING //
         ////////////////////
 
+#ifdef SERIAL_PRINT_EN
         Serial.print("Event:");
         Serial.print(3000 + (accel_event * 1000));
         Serial.print(" ");
+#endif // SERIAL_PRINT_EN
+
+        // TODO: Investigate: some kind of issue where the event flag stays 'ON' after a permanent orientation shift even once the average has caught up to the new position.
 
         // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
         // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
@@ -852,9 +847,11 @@ void loop()
                 }
             }
 
+#ifdef SERIAL_PRINT_EN
             Serial.print("E1_Q:");
             Serial.print(3000 + (event_qualifiers * 10));
             Serial.print(" ");
+#endif // SERIAL_PRINT_EN
 
             if (event_qualifiers >= ACC_EVENT_OFF_NUM)
             {
@@ -899,9 +896,11 @@ void loop()
                 }
             }
 
+#ifdef SERIAL_PRINT_EN
             Serial.print("E0_Q:");
             Serial.print(3000 + (event_qualifiers * 10));
             Serial.print(" ");
+#endif // SERIAL_PRINT_EN
 
             if (event_qualifiers >= ACC_EVENT_ON_NUM)
             {
@@ -916,9 +915,9 @@ void loop()
                 // and set the thresholds to our average acceleration magnitude * 1.5.
                 // Calculate poor man's standard deviation. std_dev.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 4);
                 accel_event = 0;
-                acc_event_threshold.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 1);
-                acc_event_threshold.y = (int16_t)((acc_calib_max.y - acc_calib_min.y) / 1);
-                acc_event_threshold.z = (int16_t)((acc_calib_max.z - acc_calib_min.z) / 1);
+                acc_event_threshold.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 2);
+                acc_event_threshold.y = (int16_t)((acc_calib_max.y - acc_calib_min.y) / 2);
+                acc_event_threshold.z = (int16_t)((acc_calib_max.z - acc_calib_min.z) / 2);
             }
             else if ((acc_i%ACC_AVG_SAMP) == 0)
             { // This ensures that we only add to the array average once the index average has been taken. 
@@ -1008,6 +1007,7 @@ void loop()
         // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
         acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
 
+#ifdef SERIAL_PRINT_EN
         Serial.print("A_X:");
         Serial.print(acc_data[idx].x);
         Serial.print(" ");
@@ -1033,6 +1033,7 @@ void loop()
         Serial.print(" ");
 
         Serial.print("\n");
+#endif // SERIAL_PRINT_EN
     }
 #endif // USING_MPU6000
 
@@ -1052,8 +1053,6 @@ void loop()
         gyro_xyz[0] = rd_buf[0] << 8 | rd_buf[1];
         gyro_xyz[1] = rd_buf[2] << 8 | rd_buf[3];
         gyro_xyz[2] = rd_buf[4] << 8 | rd_buf[5];
-
-        // // sbprintlf("[MPU6000] Gyro. XYZ (raw): %d %d %d", gyro_xyz[0], gyro_xyz[1], gyro_xyz[2]);
     }
 #endif // USING_MPU6000
 
@@ -1070,8 +1069,6 @@ void loop()
 
         // Convert the data to a usable format.
         uint16_t temp = rd_buf[0] << 8 | rd_buf[1];
-
-        // // sbprintlf("[MPU6000] Temp. (raw): %d", temp);
     }
 #endif // USING_MPU6000
     
@@ -1087,8 +1084,6 @@ void loop()
 
         // Convert to degrees C.
         float temp = (rd_buf[0] << 8 | rd_buf[1]) * TMP117_RESOLUTION;
-
-        // sbprintlf("[TMP117] Temp. (degC): %.06f", temp);
     }
 #endif // USING_TMP117
     
@@ -1102,6 +1097,6 @@ void loop()
     // TODO: Figure out transmissions.
 #endif // USING_SX1272
 
-    // While this does not ensure a constant cadence, it is the most efficient manner of ensuring the program loop runs at most twice per second.
+    // While this does not ensure a constant cadence, it is the most efficient manner of ensuring the program loop runs at most some-many times per second.
     delay(1000 / MAX_FREQUENCY);
 }
