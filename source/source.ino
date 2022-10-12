@@ -29,7 +29,8 @@
 // TODO: Change to maximum possible length.
 // Accelerometer Data Array Size = ACC_DATA_LEN * 6Bytes
 // LENGTH CANNOT EXCEED 254 (255 - 1) due to uint8_t limits.
-#define ACC_DATA_LEN 210 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
+#define ACC_DATA_LEN 128 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
+#define ACC_PEEK_DATA_LEN 32
 // How many samples do we average together before moving on?
 #define ACC_AVG_SAMP ((uint8_t)(3)) // 10 // How many samples go into each average.
 
@@ -42,7 +43,7 @@
 #define ACC_EVENT_OFF_NUM 20
 
 // How many samples are considered protected/recorded prior to declaration of an event?
-#define ACC_EVENT_BACKLOG 30
+#define ACC_EVENT_BACKLOG 10
 
 #define ACC_RECALIBRATE ((uint8_t)(32))
 
@@ -283,11 +284,6 @@ static inline uint16_t isqrt(uint32_t y)
     uint64_t L = 0;
     uint64_t M;
     uint64_t R = y + 1;
-
-    if (R < y)
-    {
-        Serial.println("Error! Overflow");
-    }
 
     while (L != R - 1)
     {
@@ -612,10 +608,13 @@ void setup()
 }
 
 int16_t acc_data[ACC_DATA_LEN];
+int16_t acc_peek_data[ACC_PEEK_DATA_LEN];
 
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 255, use uint8_t.
 // If ACC_DATA_LEN * ACC_AVG_SAMP is <= 65535, use uint16_t.
 uint16_t acc_i = 0; // NOTE: acc_i IS TO BE USED FOR ACCELEROMETER INDEXING PURPOSES ONLY! DO NOT MISUSE.
+uint16_t acc_peek_i = 0;
+uint16_t last_rec_end_i = 0;
 
 // If we are currently recording an 'event,' this will be set to the beginning index and end index of the data recorded during the event. New data recorded should not overwrite this.
 uint8_t overwrite_deny_start = ACC_DATA_LEN + 1;
@@ -636,23 +635,23 @@ uint16_3_t ucurr_val = { .x = 0, .y = 0, .z = 0 };
 uint8_t acc_loop_count = 0;
 int16_t magnitude = 0;
 
-#define CREATE_CIRC_BUF(name, len) \
-    uint16_t buf_##name[len] = {0, }; \
-    uint8_t idx_##name = 0;
+// #define CREATE_CIRC_BUF(name, len) \
+//     uint16_t buf_##name[len] = {0, }; \
+//     uint8_t idx_##name = 0;
 
-#define ARRAY_LEN(x) \
-    (sizeof(x) / sizeof(x[0]))
+// #define ARRAY_LEN(x) \
+//     (sizeof(x) / sizeof(x[0]))
 
-#define INSERT_CIRC_BUF(name, val) \
-    { \
-        buf_##name[idx_##name] = val; \
-        idx_##name = ((idx_##name) + 1) % (ARRAY_LEN(buf_##name)); \
-    }
+// #define INSERT_CIRC_BUF(name, val) \
+//     { \
+//         buf_##name[idx_##name] = val; \
+//         idx_##name = ((idx_##name) + 1) % (ARRAY_LEN(buf_##name)); \
+//     }
 
-#define GET_LAST_VAL(name) \
-    buf_##name[idx_##name]
+// #define GET_LAST_VAL(name) \
+//     buf_##name[idx_##name]
 
-CREATE_CIRC_BUF(mag, 64)
+// CREATE_CIRC_BUF(mag, 64)
 
 void loop()
 {
@@ -677,10 +676,12 @@ void loop()
     // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
     {      
+        unsigned long start = millis();
+
         // We have looped back to the zeroth element of the circular buffer.
-        if ((acc_i/ACC_AVG_SAMP) == 0)
+        if ((acc_peek_i/ACC_AVG_SAMP) == 0)
         {
-            // Recalibrate every ACC_RECALIBRATE times we fill the array.
+            // Recalibrate every ACC_RECALIBRATE times we've looped back.
             if (acc_loop_count == 0)
             {
                 accel_event = 2;
@@ -714,24 +715,24 @@ void loop()
 
         magnitude = isqrt(mag2);
 
-        Serial.print("MAGNITUDE:");
-        Serial.print(magnitude);
-        Serial.print(" ");
+        // Serial.print("MAGNITUDE:");
+        // Serial.print(magnitude);
+        // Serial.print(" ");
         
-        // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
-        acc_data[(acc_i/ACC_AVG_SAMP)] = acc_data[(acc_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_data[(acc_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+        if (accel_event == 0 || accel_event == 2) // No Event or Calib (Use Peek)
+        {
+            // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+            acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] = acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_peek_i%ACC_AVG_SAMP ) );
+        }
+        else if (accel_event == 1) // Event (Use Rec)
+        {
+            // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+            acc_data[(acc_i/ACC_AVG_SAMP)] = acc_data[(acc_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_data[(acc_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+        }
 
         ////////////////////
         // EVENT HANDLING //
         ////////////////////
-
-#ifdef SERIAL_PRINT_EN
-        // Serial.print("Event:");
-        // Serial.print(3000 + (accel_event * 1000));
-        // Serial.print(" ");
-#endif // SERIAL_PRINT_EN
-
-        // TODO: Investigate: some kind of issue where the event flag stays 'ON' after a permanent orientation shift even once the average has caught up to the new position.
 
         // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
         // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
@@ -739,28 +740,12 @@ void loop()
         // While sampling, we should skip over UNTRANSMITTED RECORDED data.
         if (accel_event == 1)
         { // Currently experiencing an accelerometer event.
-            if ((acc_i / ACC_AVG_SAMP) >= overwrite_deny_start)
-            {
-                // We just reached, while RECORDING, the beginning of the UNTRANSMITTED RECORDED data section.
-                // TODO: Determine what we do; do we overwrite old data or cancel the event recording?
-            }
-
             // Event determination. 
             // Event declared inactive if _OFF_NUM-many samples do not exceed the threshold out of the last _CONSIDER_NUM-many samples.
 
-            // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0, make it loop properly.
-            uint8_t i = 0;
-            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_OFF_CONSIDER_NUM)
-            {
-                i = ACC_DATA_LEN - (ACC_EVENT_OFF_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
-            }
-            else
-            {
-                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_CONSIDER_NUM;
-            }
-
             uint8_t event_qualifiers = 0;
-            for (; i < (acc_i/ACC_AVG_SAMP); i++)
+            int16_t i = (acc_i/ACC_AVG_SAMP);
+            for (; (i != last_rec_end_i) && (i != ((acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_CONSIDER_NUM) % ACC_DATA_LEN); i = (i - 1) % ACC_DATA_LEN)
             {
                 // Detect threshold violations.
                 if (acc_data[i] < acc_calib_mean + acc_event_threshold)
@@ -769,55 +754,39 @@ void loop()
                 }
             }
 
-#ifdef SERIAL_PRINT_EN
-            // Serial.print("E1_Q:");
-            // Serial.print(3000 + (event_qualifiers * 10));
-            // Serial.print(" ");
-#endif // SERIAL_PRINT_EN
-
             if (event_qualifiers >= ACC_EVENT_OFF_NUM)
             {
+                last_rec_end_i = (acc_i/ACC_AVG_SAMP);
                 accel_event = 0;
+                acc_peek_i = 0;
             }
         }
         else if (accel_event == 0)
         { // Not currently experiencing an accelerometer event.
-            if ((acc_i / ACC_AVG_SAMP) >= overwrite_deny_start)
-            {
-                // We just reached, while SAMPLING, the beginning of the UNTRANSMITTED RECORDED data section.
-                // We should skip over this area and continue sampling.
-                acc_i = ((overwrite_deny_end + 1) % ACC_DATA_LEN) * ACC_AVG_SAMP;
-            }
 
             // Event determination.
             // Event declared active if _ON_NUM-many samples exceed the threshold out of the last _CONSIDER_NUM-many samples.
             
             // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0, make it loop properly.
             uint8_t i = 0;
-            if ((acc_i/ACC_AVG_SAMP) < ACC_EVENT_ON_CONSIDER_NUM)
+            if ((acc_peek_i/ACC_AVG_SAMP) < ACC_EVENT_ON_CONSIDER_NUM)
             {
-                i = ACC_DATA_LEN - (ACC_EVENT_ON_CONSIDER_NUM - (acc_i/ACC_AVG_SAMP));
+                i = ACC_PEEK_DATA_LEN - (ACC_EVENT_ON_CONSIDER_NUM - (acc_peek_i/ACC_AVG_SAMP));
             }
             else
             {
-                i = (acc_i/ACC_AVG_SAMP) - ACC_EVENT_ON_CONSIDER_NUM;
+                i = (acc_peek_i/ACC_AVG_SAMP) - ACC_EVENT_ON_CONSIDER_NUM;
             }
 
             uint8_t event_qualifiers = 0;
-            for (; i < (acc_i/ACC_AVG_SAMP); i++)
+            for (; i < (acc_peek_i/ACC_AVG_SAMP); i++)
             {
                 // Detect threshold violations.
-                if (acc_data[i] > acc_calib_mean + acc_event_threshold)
+                if (acc_peek_data[i] > acc_calib_mean + acc_event_threshold)
                 {
                     event_qualifiers++;
                 }
             }
-
-#ifdef SERIAL_PRINT_EN
-            // Serial.print("E0_Q:");
-            // Serial.print(3000 + (event_qualifiers * 10));
-            // Serial.print(" ");
-#endif // SERIAL_PRINT_EN
 
             if (event_qualifiers >= ACC_EVENT_ON_NUM)
             {
@@ -826,75 +795,95 @@ void loop()
         }
         else if (accel_event == 2) // Lunar Noise Calibration Required
         {   
-            if (acc_i/ACC_AVG_SAMP >= ACC_DATA_LEN-1)
+            if (acc_peek_i/ACC_AVG_SAMP >= ACC_PEEK_DATA_LEN-1)
             {
                 // Once we fill the buffer, set accel_event from CALIBRATE to FALSE,
                 // and set the thresholds to our average acceleration magnitude * 1.5.
                 // Calculate poor man's standard deviation. std_dev.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 4);
                 accel_event = 0;
                 acc_event_threshold = (int16_t)((acc_calib_max - acc_calib_min) / 2);
-                // acc_event_threshold.y = (int16_t)((acc_calib_max.y - acc_calib_min.y) / 2);
-                // acc_event_threshold.z = (int16_t)((acc_calib_max.z - acc_calib_min.z) / 2);
             }
-            else if ((acc_i%ACC_AVG_SAMP) == 0)
+            else if ((acc_peek_i%ACC_AVG_SAMP) == 0)
             { // This ensures that we only add to the array average once the index average has been taken. 
               // acc_data[(acc_i/ACC_AVG_SAMP)-1].x should ensure we take the previously averaged one once we move on.
                 // Keep a rolling average of collected data in the last index as we go.
                 
                 // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
-                acc_calib_mean = acc_calib_mean + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1] - acc_calib_mean ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
-                // acc_calib_mean.y = acc_calib_mean.y + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1].y - acc_calib_mean.y ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
-                // acc_calib_mean.z = acc_calib_mean.z + ( ( acc_data[(acc_i/ACC_AVG_SAMP)-1].z - acc_calib_mean.z ) / ( (int16_t)acc_i/ACC_AVG_SAMP ) );
+                acc_calib_mean = acc_calib_mean + ( ( acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)-1] - acc_calib_mean ) / ( (int16_t)acc_peek_i/ACC_AVG_SAMP ) );
 
                 // Keep track of min/max during calibration.
-                // TODO: Maybe when a new max is discovered, set the max to the average of the OldMax and NewMax.
                 if (magnitude > acc_calib_max)
                 {
                     acc_calib_max = magnitude;
-                    // acc_calib_max.x = (int16_t)((acc_calib_max.x + curr_val.x) / 2);
                 }
                 else if (magnitude < acc_calib_min)
                 {
                     acc_calib_min = magnitude;
-                    // acc_calib_min.x = (int16_t)((acc_calib_min.x + curr_val.x) / 2);
                 }
             }
         }
 
-        uint8_t idx = 0;
-        if (acc_i/ACC_AVG_SAMP == 0)
+        uint8_t last_peek_idx = 0;
+        if (acc_peek_i/ACC_AVG_SAMP == 0)
         {
-            idx = ACC_DATA_LEN - 1;
+            last_peek_idx = ACC_PEEK_DATA_LEN - 1;
         }
         else
         {
-            idx = (acc_i/ACC_AVG_SAMP) - 1;
+            last_peek_idx = (acc_peek_i/ACC_AVG_SAMP) - 1;
         }
 
-        if (accel_event != 2 && ((acc_i%ACC_AVG_SAMP) == 0))
+        uint8_t last_idx = 0;
+        if (acc_i/ACC_AVG_SAMP == 0)
+        {
+            last_idx = ACC_PEEK_DATA_LEN - 1;
+        }
+        else
+        {
+            last_idx = (acc_i/ACC_AVG_SAMP) - 1;
+        }
+
+        if (accel_event == 0 && ((acc_peek_i%ACC_AVG_SAMP) == 0))
         {
             // Adjust the calibrated mean to follow the changing trends.
-            if (acc_data[idx] > acc_calib_mean)
+            if (acc_peek_data[last_peek_idx] > acc_calib_mean)
             {
-                acc_calib_mean += ((acc_data[idx] - acc_calib_mean) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+                acc_calib_mean += ((acc_peek_data[last_peek_idx] - acc_calib_mean) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
             }
-            else if (acc_data[idx] < acc_calib_mean)
+            else if (acc_peek_data[last_peek_idx] < acc_calib_mean)
             {
-                acc_calib_mean -= ((acc_calib_mean - acc_data[idx]) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
+                acc_calib_mean -= ((acc_calib_mean - acc_peek_data[last_peek_idx]) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
             }
         }
 
-        // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
-        acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
+        if (accel_event == 1)
+        {
+            // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
+            acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
+        }
+        else
+        {
+            acc_peek_i = (acc_peek_i + 1) % (ACC_PEEK_DATA_LEN * ACC_AVG_SAMP);
+        }
+
+        unsigned long end = millis();
+        Serial.print(F("FunctionalTime:"));
+        Serial.print((end - start)+7000);
+        Serial.print(F(" "));
+        start = millis();
 
 #ifdef SERIAL_PRINT_EN
-        Serial.print(F("A_MAG:"));
-        Serial.print(acc_data[idx]);
+        Serial.print(F("Last-acc_peek_data:"));
+        Serial.print(acc_peek_data[last_peek_idx]);
         Serial.print(F(" "));
 
-        Serial.print(F("MEAN:"));
-        Serial.print(acc_calib_mean);
+        Serial.print(F("Last-acc_data:"));
+        Serial.print(acc_data[last_idx]);
         Serial.print(F(" "));
+
+        // Serial.print(F("MEAN:"));
+        // Serial.print(acc_calib_mean);
+        // Serial.print(F(" "));
 
         Serial.print(F("MEAN_P:"));
         Serial.print(acc_calib_mean + acc_event_threshold);
@@ -904,15 +893,47 @@ void loop()
         Serial.print(acc_calib_mean - acc_event_threshold);
         Serial.print(F(" "));
 
-        Serial.print(F("MAX:"));
-        Serial.print(acc_calib_max);
-        Serial.print(F(" "));
+        // if (accel_event == 2)
+        // {
+        //     Serial.print(F("EVENT:"));
+        //     Serial.print(acc_calib_mean - 200);
+        //     Serial.print(F(" "));
+        // }
+        // else if (accel_event == 1)
+        // {
+        //     Serial.print(F("EVENT:"));
+        //     Serial.print(acc_calib_mean + 200);
+        //     Serial.print(F(" "));
+        // }
+        // else
+        // {
+        //     Serial.print(F("EVENT:"));
+        //     Serial.print(acc_calib_mean);
+        //     Serial.print(F(" "));
+        // }
+
+        // Serial.print(F("MAX:"));
+        // Serial.print(acc_calib_max);
+        // Serial.print(F(" "));
         
-        Serial.print(F("MIN:"));
-        Serial.print(acc_calib_min);
-        Serial.print(F(" "));
+        // Serial.print(F("MIN:"));
+        // Serial.print(acc_calib_min);
+        // Serial.print(F(" "));
+
+        // Serial.print(F("acc_i:"));
+        // Serial.print((acc_i*5)+7000);
+        // Serial.print(F(" "));
+
+        // Serial.print(F("acc_peek_i:"));
+        // Serial.print((acc_peek_i*10)+7000);
+        // Serial.print(F(" "));
 
         Serial.print(F("\n"));
+
+        end = millis();
+        Serial.print(F("NonFunctionalTime:"));
+        Serial.print((end - start)+7000);
+        Serial.print(F(" "));
 #endif // SERIAL_PRINT_EN
     }
 #endif // USING_MPU6000
