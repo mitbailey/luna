@@ -13,10 +13,7 @@
 
 #define SERIAL_PRINT_EN // Enables printouts.
 
-// #include "meb_print_serial.h"
-
-// The program loop is guaranteed to run at most this many times per second.
-#define MAX_FREQUENCY ((uint8_t)(60)) // 60
+#define FREQUENCY ((uint8_t)(60)) // Accurate to +- millisecond; guaranteed to not run faster.
 
 /// SENSOR USAGE CONDITIONALS
 // #define USING_MLX90393
@@ -26,26 +23,13 @@
 // #define USING_TPIS1385
 // #define USING_CAP
 
-// TODO: Change to maximum possible length.
-// Accelerometer Data Array Size = ACC_DATA_LEN * 6Bytes
-// LENGTH CANNOT EXCEED 254 (255 - 1) due to uint8_t limits.
-#define ACC_DATA_LEN 128 // If ACC_AVG_SAMP == MAX_FREQUENCY then we will have ACC_DATA_LEN seconds worth of recording time.
-#define ACC_PEEK_DATA_LEN 32
-// How many samples do we average together before moving on?
-#define ACC_AVG_SAMP ((uint8_t)(3)) // 10 // How many samples go into each average.
-
-
-// Event ACTIVE if >=ACC_EVENT_ON_NUM of the last ACC_EVENT_ON_CONSIDER_NUM averages exceed the threshold.
-// Event INACTIVE if >=ACC_EVENT_OFF_NUM of the last ACC_EVENT_ON_CONSIDER_NUM averages do not exceed the threshold.
-#define ACC_EVENT_ON_CONSIDER_NUM 10
-#define ACC_EVENT_ON_NUM 1
-#define ACC_EVENT_OFF_CONSIDER_NUM 20
-#define ACC_EVENT_OFF_NUM 20
-
-// How many samples are considered protected/recorded prior to declaration of an event?
-#define ACC_EVENT_BACKLOG 10
-
-#define ACC_RECALIBRATE ((uint8_t)(32))
+/// ACCELEROMETER LOOP VALUES
+#define ACC_DATA_LEN 128 // Accelerometer data array size: used during an event. RecordingTime = (ACC_DATA_LEN * ACC_AVG_SAMP) / (FREQUENCY)
+#define ACC_PEEK_DATA_LEN 32 // Accelerometer peek array size: used when there is no event.
+#define ACC_AVG_SAMP ((uint8_t)(3)) // Each element of the data and peek arrays will be this many averaged samples.
+#define ACC_EVENT_OFF_NUM 20 // How many consecutive elements in the data array must be below threshold to constitute the end of an event.
+#define ACC_EVENT_BACKLOG 10 // The number of samples we copy from the peek array to the data array on declaration of an event.
+#define ACC_RECALIBRATE ((uint8_t)(32)) // The accelerometer standard deviation is recalibrated every this many times the peek array is filled.
 
 ///////////////////////////////
 // SENSOR-SPECIFIC CONSTANTS //
@@ -200,22 +184,16 @@
 #define TP_I2C_ADDR 63  
 #define TPIS1385_I2C_ADDR 0x0D
 
-#define MIN3(a,b,c) a < b ? b : a
-
-// This type is used for storing processed accelerometer data into the acc_data array. Note: Processed meaning rolling averaged.
-typedef struct
+/**
+ * @brief Event states.
+ * 
+ */
+enum
 {
-    int16_t x;
-    int16_t y;
-    int16_t z;
-} int16_3_t;
-
-typedef struct
-{
-    uint16_t x;
-    uint16_t y;
-    uint16_t z;
-} uint16_3_t;
+    E_INACTIVE,
+    E_ACTIVE,
+    E_CALIBRATE
+};
 
 /**
  * @brief Write bytes to the i2c device.
@@ -279,6 +257,12 @@ static inline uint8_t i2cbus_transfer(uint8_t dev_addr, uint8_t *out_buf, uint8_
     return i;
 }
 
+/**
+ * @brief Calculates the integer square root.
+ * 
+ * @param y The operand.
+ * @return uint16_t The square root.
+ */
 static inline uint16_t isqrt(uint32_t y)
 {
     uint64_t L = 0;
@@ -302,19 +286,18 @@ static inline uint16_t isqrt(uint32_t y)
     return (uint16_t)L;
 }
 
-// TEMP
-// MLX90393 magnetometer = MLX90393(1,false);
-// MPU6000 accelerometer(1, false); // Sets sensor ID to 1 and debugging to false
-// TMP117 thermometer(1,false);
-// TPIS1385 thermopile(1);
-
 // Actually important global variables.
 float TPIS_cal_K = 0.f; // TPIS calibration constant.
 uint16_t MPU6000_accel_scale = 0;
+
+///////////
+// SETUP //
+///////////
+
 void setup()
 {
     // NOTE: Setup sequences taken from the basic setup examples found in: 
-    //       github.com/GLEE2023/GLEE2023/examples/Sensor_Examples
+    // github.com/GLEE2023/GLEE2023/examples/Sensor_Examples
 
 #ifdef SERIAL_PRINT_EN
     Serial.begin(9600);
@@ -607,6 +590,10 @@ void setup()
 #endif // USING_SX1272
 }
 
+////////////////////
+// LOOP VARIABLES //
+////////////////////
+
 int16_t acc_data[ACC_DATA_LEN];
 int16_t acc_peek_data[ACC_PEEK_DATA_LEN];
 
@@ -630,42 +617,44 @@ int16_t acc_event_threshold = 0;
 int16_t acc_calib_mean = 0;
 int16_t acc_calib_max = 0;
 int16_t acc_calib_min = 0;
-int16_3_t curr_val = { .x = 0, .y = 0, .z = 0 };
-uint16_3_t ucurr_val = { .x = 0, .y = 0, .z = 0 };
 uint8_t acc_loop_count = 0;
 int16_t magnitude = 0;
 
-// #define CREATE_CIRC_BUF(name, len) \
-//     uint16_t buf_##name[len] = {0, }; \
-//     uint8_t idx_##name = 0;
+uint8_t last_peek_idx = 0;
+uint8_t last_idx = 0;
 
-// #define ARRAY_LEN(x) \
-//     (sizeof(x) / sizeof(x[0]))
+unsigned long time = 0;
+unsigned long time_2 = 0;
 
-// #define INSERT_CIRC_BUF(name, val) \
-//     { \
-//         buf_##name[idx_##name] = val; \
-//         idx_##name = ((idx_##name) + 1) % (ARRAY_LEN(buf_##name)); \
-//     }
-
-// #define GET_LAST_VAL(name) \
-//     buf_##name[idx_##name]
-
-// CREATE_CIRC_BUF(mag, 64)
+//////////
+// LOOP //
+//////////
 
 void loop()
 {
-    // Mark the beginning of the loop.
-    // time = millis();
+    time = millis();
+    time += (1000/FREQUENCY);
+
+    ////////////////////////////
+    /// TRANSCEIVER (SX1272) ///
+    ////////////////////////////
 
 #ifdef USING_SX1272
     // TODO: Manual radio T/RX, probably with an interrupt handler.
 #endif // USING_SX1272
 
+    ///////////////////////////////
+    /// CAPACITIVE SENSOR (CAP) ///
+    ///////////////////////////////
+
 #ifdef USING_CAP
     // CAP read.
     int CAP_data = analogRead(PIN_CAP);
 #endif // USING_CAP
+
+    ///////////////////////////////
+    /// MAGNETOMETER (MLX90393) ///
+    ///////////////////////////////
 
 #ifdef USING_MLX90393
     // MLX read.
@@ -673,25 +662,13 @@ void loop()
     // TODO: Manual MLX90393 magnetometer reading.
 #endif // USING_MLX90393
 
+    ///////////////////////////////
+    /// ACCELEROMETER (MPU6000) ///
+    ///////////////////////////////
+
     // MPU6000 accelerometer read.
 #ifdef USING_MPU6000
     {      
-        unsigned long start = millis();
-
-        // We have looped back to the zeroth element of the circular buffer.
-        if ((acc_peek_i/ACC_AVG_SAMP) == 0)
-        {
-            // Recalibrate every ACC_RECALIBRATE times we've looped back.
-            if (acc_loop_count == 0)
-            {
-                accel_event = 2;
-                acc_calib_max = -32768;
-                acc_calib_min = 32767;
-            }
-
-            acc_loop_count = (acc_loop_count + 1) % ACC_RECALIBRATE;
-        }
-
         // NOTE: The data coming out of the MPU6000 is in a weird 16-bit format. Performing the (rd_buf[0] << 8 | rd_buf[1]) operation on each X, Y, and Z element converts it into int16_t.
 
         /////////////////////
@@ -715,115 +692,16 @@ void loop()
 
         magnitude = isqrt(mag2);
 
+#ifdef SERIAL_PRINT_EN
         // Serial.print("MAGNITUDE:");
         // Serial.print(magnitude);
         // Serial.print(" ");
+#endif // SERIAL_PRINT_EN
         
-        if (accel_event == 0 || accel_event == 2) // No Event or Calib (Use Peek)
-        {
-            // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
-            acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] = acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_peek_i%ACC_AVG_SAMP ) );
-        }
-        else if (accel_event == 1) // Event (Use Rec)
-        {
-            // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
-            acc_data[(acc_i/ACC_AVG_SAMP)] = acc_data[(acc_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_data[(acc_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
-        }
+        //////////////////////
+        // SET LAST INDICES //
+        //////////////////////
 
-        ////////////////////
-        // EVENT HANDLING //
-        ////////////////////
-
-        // If we are not currently in an accelerometer event, then we are SAMPLING data but not RECORDING.
-        // However, there exists the possibility that data from a previously RECORDED event has not yet been TRANSMITTED.
-        // UNTRANSMITTED RECORDED data is marked by the overwrite_deny_start and overwrite_deny_end bounds.
-        // While sampling, we should skip over UNTRANSMITTED RECORDED data.
-        if (accel_event == 1)
-        { // Currently experiencing an accelerometer event.
-            // Event determination. 
-            // Event declared inactive if _OFF_NUM-many samples do not exceed the threshold out of the last _CONSIDER_NUM-many samples.
-
-            uint8_t event_qualifiers = 0;
-            int16_t i = (acc_i/ACC_AVG_SAMP);
-            for (; (i != last_rec_end_i) && (i != ((acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_CONSIDER_NUM) % ACC_DATA_LEN); i = (i - 1) % ACC_DATA_LEN)
-            {
-                // Detect threshold violations.
-                if (acc_data[i] < acc_calib_mean + acc_event_threshold)
-                {
-                    event_qualifiers++;
-                }
-            }
-
-            if (event_qualifiers >= ACC_EVENT_OFF_NUM)
-            {
-                last_rec_end_i = (acc_i/ACC_AVG_SAMP);
-                accel_event = 0;
-                acc_peek_i = 0;
-            }
-        }
-        else if (accel_event == 0)
-        { // Not currently experiencing an accelerometer event.
-
-            // Event determination.
-            // Event declared active if _ON_NUM-many samples exceed the threshold out of the last _CONSIDER_NUM-many samples.
-            
-            // If subtracting ACC_EVENT_CONSIDER_NUM from the current index results in <0, make it loop properly.
-            uint8_t i = 0;
-            if ((acc_peek_i/ACC_AVG_SAMP) < ACC_EVENT_ON_CONSIDER_NUM)
-            {
-                i = ACC_PEEK_DATA_LEN - (ACC_EVENT_ON_CONSIDER_NUM - (acc_peek_i/ACC_AVG_SAMP));
-            }
-            else
-            {
-                i = (acc_peek_i/ACC_AVG_SAMP) - ACC_EVENT_ON_CONSIDER_NUM;
-            }
-
-            uint8_t event_qualifiers = 0;
-            for (; i < (acc_peek_i/ACC_AVG_SAMP); i++)
-            {
-                // Detect threshold violations.
-                if (acc_peek_data[i] > acc_calib_mean + acc_event_threshold)
-                {
-                    event_qualifiers++;
-                }
-            }
-
-            if (event_qualifiers >= ACC_EVENT_ON_NUM)
-            {
-                accel_event = 1;
-            }
-        }
-        else if (accel_event == 2) // Lunar Noise Calibration Required
-        {   
-            if (acc_peek_i/ACC_AVG_SAMP >= ACC_PEEK_DATA_LEN-1)
-            {
-                // Once we fill the buffer, set accel_event from CALIBRATE to FALSE,
-                // and set the thresholds to our average acceleration magnitude * 1.5.
-                // Calculate poor man's standard deviation. std_dev.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 4);
-                accel_event = 0;
-                acc_event_threshold = (int16_t)((acc_calib_max - acc_calib_min) / 2);
-            }
-            else if ((acc_peek_i%ACC_AVG_SAMP) == 0)
-            { // This ensures that we only add to the array average once the index average has been taken. 
-              // acc_data[(acc_i/ACC_AVG_SAMP)-1].x should ensure we take the previously averaged one once we move on.
-                // Keep a rolling average of collected data in the last index as we go.
-                
-                // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
-                acc_calib_mean = acc_calib_mean + ( ( acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)-1] - acc_calib_mean ) / ( (int16_t)acc_peek_i/ACC_AVG_SAMP ) );
-
-                // Keep track of min/max during calibration.
-                if (magnitude > acc_calib_max)
-                {
-                    acc_calib_max = magnitude;
-                }
-                else if (magnitude < acc_calib_min)
-                {
-                    acc_calib_min = magnitude;
-                }
-            }
-        }
-
-        uint8_t last_peek_idx = 0;
         if (acc_peek_i/ACC_AVG_SAMP == 0)
         {
             last_peek_idx = ACC_PEEK_DATA_LEN - 1;
@@ -833,7 +711,6 @@ void loop()
             last_peek_idx = (acc_peek_i/ACC_AVG_SAMP) - 1;
         }
 
-        uint8_t last_idx = 0;
         if (acc_i/ACC_AVG_SAMP == 0)
         {
             last_idx = ACC_PEEK_DATA_LEN - 1;
@@ -843,34 +720,154 @@ void loop()
             last_idx = (acc_i/ACC_AVG_SAMP) - 1;
         }
 
-        if (accel_event == 0 && ((acc_peek_i%ACC_AVG_SAMP) == 0))
-        {
-            // Adjust the calibrated mean to follow the changing trends.
-            if (acc_peek_data[last_peek_idx] > acc_calib_mean)
-            {
-                acc_calib_mean += ((acc_peek_data[last_peek_idx] - acc_calib_mean) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
-            }
-            else if (acc_peek_data[last_peek_idx] < acc_calib_mean)
-            {
-                acc_calib_mean -= ((acc_calib_mean - acc_peek_data[last_peek_idx]) / ((uint16_t)(MAX_FREQUENCY/2))) + 1;
-            }
-        }
+        ////////////////////
+        // EVENT HANDLING //
+        ////////////////////
 
-        if (accel_event == 1)
+        switch (accel_event)
         {
-            // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
-            acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
-        }
-        else
-        {
-            acc_peek_i = (acc_peek_i + 1) % (ACC_PEEK_DATA_LEN * ACC_AVG_SAMP);
-        }
+            case E_INACTIVE:
+            {
+                //////////////////
+                // DATA LOGGING //
+                //////////////////
 
-        unsigned long end = millis();
-        Serial.print(F("FunctionalTime:"));
-        Serial.print((end - start)+7000);
-        Serial.print(F(" "));
-        start = millis();
+                // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+                acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] = acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_peek_i%ACC_AVG_SAMP ) );
+
+                /////////////////////////
+                // EVENT DETERMINATION //
+                /////////////////////////
+
+                if (acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] > acc_calib_mean + acc_event_threshold
+                 || acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)] < acc_calib_mean - acc_event_threshold)
+                {
+                    accel_event = E_ACTIVE;
+                }
+                // TODO: May be able to compress event det and recal check.
+                /////////////////////////
+                // RECALIBRATION CHECK //
+                /////////////////////////
+
+                // We have looped back to the zeroth element of the peek circular buffer.
+                if ((acc_peek_i/ACC_AVG_SAMP) == 0)
+                {
+                    // Recalibrate every ACC_RECALIBRATE times we've looped back.
+                    if (acc_loop_count == 0)
+                    {
+                        accel_event = E_CALIBRATE;
+                        acc_calib_max = -32768;
+                        acc_calib_min = 32767;
+                    }
+
+                    acc_loop_count = (acc_loop_count + 1) % ACC_RECALIBRATE;
+                }
+
+                ////////////////////////////////
+                // CALIBRATED MEAN ADJUSTMENT //
+                ////////////////////////////////
+
+                if ((acc_peek_i%ACC_AVG_SAMP) == 0)
+                {
+                    // Adjust the calibrated mean to follow the changing trends.
+                    if (acc_peek_data[last_peek_idx] > acc_calib_mean)
+                    {
+                        acc_calib_mean += ((acc_peek_data[last_peek_idx] - acc_calib_mean) / ((uint16_t)(FREQUENCY/2))) + 1;
+                    }
+                    else if (acc_peek_data[last_peek_idx] < acc_calib_mean)
+                    {
+                        acc_calib_mean -= ((acc_calib_mean - acc_peek_data[last_peek_idx]) / ((uint16_t)(FREQUENCY/2))) + 1;
+                    }
+                }
+
+                ///////////////
+                // ITERATION //
+                ///////////////
+
+                acc_peek_i = (acc_peek_i + 1) % (ACC_PEEK_DATA_LEN * ACC_AVG_SAMP);
+            }
+            case E_ACTIVE:
+            {
+                //////////////////
+                // DATA LOGGING //
+                //////////////////
+
+                // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+                acc_data[(acc_i/ACC_AVG_SAMP)] = acc_data[(acc_i/ACC_AVG_SAMP)] + ( ( magnitude - acc_data[(acc_i/ACC_AVG_SAMP)] ) / ( (int16_t)acc_i%ACC_AVG_SAMP ) );
+                
+                /////////////////////////
+                // EVENT DETERMINATION //
+                /////////////////////////
+
+                // Currently experiencing an accelerometer event.
+                // Event determination. 
+                // Event declared inactive if _OFF_NUM-many samples do not exceed the threshold out of the last _CONSIDER_NUM-many samples.
+
+                uint8_t event_qualifiers = 0;
+                int16_t i = (acc_i/ACC_AVG_SAMP);
+                for (; (i != last_rec_end_i) && (i != ((acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_NUM) % ACC_DATA_LEN); i = (i - 1) % ACC_DATA_LEN)
+                {
+                    // Detect threshold violations.
+                    if (acc_data[i] < acc_calib_mean + acc_event_threshold)
+                    {
+                        event_qualifiers++;
+                    }
+                }
+
+                if (event_qualifiers == ACC_EVENT_OFF_NUM)
+                {
+                    last_rec_end_i = (acc_i/ACC_AVG_SAMP);
+                    accel_event = E_INACTIVE;
+                    acc_peek_i = 0;
+                }
+
+                ///////////////
+                // ITERATION //
+                ///////////////
+
+                // acc_i iterates once each loop, but data is only finalized once every ACC_AVG_SAMP loops. So thats why we then have to divide acc_i by ACC_AVG_SAMP all the time.
+                acc_i = (acc_i + 1) % (ACC_DATA_LEN * ACC_AVG_SAMP);
+            }
+            case E_CALIBRATE:
+            {
+                /////////////////
+                // CALIBRATION //
+                /////////////////
+
+                if (acc_peek_i/ACC_AVG_SAMP >= ACC_PEEK_DATA_LEN-1)
+                {
+                    // Once we fill the buffer, set accel_event from CALIBRATE to FALSE,
+                    // and set the thresholds to our average acceleration magnitude * 1.5.
+                    // Calculate poor man's standard deviation. std_dev.x = (int16_t)((acc_calib_max.x - acc_calib_min.x) / 4);
+                    accel_event = 0;
+                    acc_event_threshold = (int16_t)((acc_calib_max - acc_calib_min) / 2);
+                }
+                else if ((acc_peek_i%ACC_AVG_SAMP) == 0)
+                { // This ensures that we only add to the array average once the index average has been taken. 
+                // acc_data[(acc_i/ACC_AVG_SAMP)-1].x should ensure we take the previously averaged one once we move on.
+                    // Keep a rolling average of collected data in the last index as we go.
+                    
+                    // Welford's Method: M[k] = M[k-1] + ( ( x[k] - M[k-1] ) / ( k ) )
+                    acc_calib_mean = acc_calib_mean + ( ( acc_peek_data[(acc_peek_i/ACC_AVG_SAMP)-1] - acc_calib_mean ) / ( (int16_t)acc_peek_i/ACC_AVG_SAMP ) );
+
+                    // Keep track of min/max during calibration.
+                    if (magnitude > acc_calib_max)
+                    {
+                        acc_calib_max = magnitude;
+                    }
+                    else if (magnitude < acc_calib_min)
+                    {
+                        acc_calib_min = magnitude;
+                    }
+                }
+
+                ///////////////
+                // ITERATION //
+                ///////////////
+
+                acc_peek_i = (acc_peek_i + 1) % (ACC_PEEK_DATA_LEN * ACC_AVG_SAMP);
+            }
+        }
 
 #ifdef SERIAL_PRINT_EN
         Serial.print(F("Last-acc_peek_data:"));
@@ -929,14 +926,13 @@ void loop()
         // Serial.print(F(" "));
 
         Serial.print(F("\n"));
-
-        end = millis();
-        Serial.print(F("NonFunctionalTime:"));
-        Serial.print((end - start)+7000);
-        Serial.print(F(" "));
 #endif // SERIAL_PRINT_EN
     }
 #endif // USING_MPU6000
+
+    ///////////////////////////
+    /// GYROMETER (MPU6000) ///
+    ///////////////////////////
 
 #ifdef USING_MPU6000
     // MPU6000 gyrometer read.
@@ -957,6 +953,10 @@ void loop()
     }
 #endif // USING_MPU6000
 
+    ////////////////////////////////////
+    /// TEMPERATURE SENSOR (MPU6000) ///
+    ////////////////////////////////////
+
 #ifdef USING_MPU6000
     // MPU6000 temperature read.
     {
@@ -973,6 +973,10 @@ void loop()
     }
 #endif // USING_MPU6000
     
+    ///////////////////////////////////
+    /// TEMPERATURE SENSOR (TMP117) ///
+    ///////////////////////////////////
+
 #ifdef USING_TMP117
     // TMP117 thermometer read.
     {
@@ -988,16 +992,28 @@ void loop()
     }
 #endif // USING_TMP117
     
+    /////////////////////////////
+    /// THERMOPILE (TPIS1385) ///
+    /////////////////////////////
+
 #ifdef USING_TPIS1385
     // TPile read.
     // inplaceof: TPsample_t temperatures = thermopile.getSample();
     // TODO: Manual thermopile reading.
 #endif // USING_TPIS1385
 
+    ////////////////////////////
+    /// TRANSCEIVER (SX1272) ///
+    ////////////////////////////
+
 #ifdef USING_SX1272
     // TODO: Figure out transmissions.
 #endif // USING_SX1272
 
-    // While this does not ensure a constant cadence, it is the most efficient manner of ensuring the program loop runs at most some-many times per second.
-    delay(1000 / MAX_FREQUENCY);
+    time_2 = millis();
+
+    if (time_2 < time)
+    {
+        delay(time_2 - time);
+    }
 }
