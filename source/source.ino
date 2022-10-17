@@ -627,6 +627,8 @@ uint8_t last_idx = 0;
 unsigned long time = 0;
 unsigned long time_2 = 0;
 int global_violations = 0;
+uint16_t since_last_violation = 0;
+
 //////////
 // LOOP //
 //////////
@@ -776,44 +778,28 @@ void loop()
                 // EVENT DETERMINATION //
                 /////////////////////////
 
-                // !ERROR!
-                // TODO: Inf loops here (between TEST5 and TEST6) when acc_i == 0 and violations == 0
-                // i somehow ends up negative, loops forever. ???
-
-                // Event declared inactive if none of the last _CONSIDER_NUM-many samples violate the threshold.
-                uint8_t violations = 0;
-                int16_t i = (acc_i/ACC_AVG_SAMP);
-                for (; (i != last_rec_end_i) && (i != (((acc_i/ACC_AVG_SAMP) - ACC_EVENT_OFF_NUM) % ACC_DATA_LEN)); i = ((i - 1) % ACC_DATA_LEN))
+                if ((acc_i%ACC_AVG_SAMP) == 0) 
                 {
-                    if (i <= 0)
+                    if (acc_data[last_idx] > acc_calib_mean + acc_event_threshold
+                    || acc_data[last_idx] < acc_calib_mean - acc_event_threshold)
                     {
-                        Serial.println();
-                        Serial.print("i");
-                        Serial.println(i);
-                        Serial.print("last_rec_end_i");
-                        Serial.println(last_rec_end_i);
-                        Serial.print("acc_i");
-                        Serial.println(acc_i);
-                        Serial.print("ACC_DATA_LEN");
-                        Serial.println(ACC_DATA_LEN);
-                        Serial.println();
+                        Serial.println("Violation detected!");
+                        since_last_violation = 0;
                     }
-
-                    if (acc_data[i] > acc_calib_mean + acc_event_threshold
-                    || acc_data[i] < acc_calib_mean - acc_event_threshold)
+                    else
                     {
-                        violations++;
+                        since_last_violation++;
                     }
                 }
-                global_violations = violations;
 
-                // There are no threshold violations AND there have been a viable number of samples taken.
-                if ((violations == 0) && (((i - last_rec_end_i) % ACC_DATA_LEN) > ACC_EVENT_OFF_NUM))
+                if (since_last_violation > ACC_EVENT_OFF_NUM)
                 {
+                    since_last_violation = 0;
                     last_rec_end_i = (acc_i/ACC_AVG_SAMP);
                     accel_event = E_INACTIVE;
                     // acc_peek_i = 0;
                 }
+
                 ///////////////
                 // ITERATION //
                 ///////////////
@@ -906,8 +892,8 @@ void loop()
         Serial.print(((acc_peek_i)*5)+7600);
         Serial.print(F(" "));
 
-        Serial.print(F("VIOLATIONS:"));
-        Serial.print(((global_violations)*10)+7600);
+        Serial.print(F("SinceLastViolation:"));
+        Serial.print(((since_last_violation)*10)+7600);
         Serial.print(F(" "));
 
         Serial.print(F("EVENT:"));
