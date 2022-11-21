@@ -50,6 +50,7 @@
 #define STATE_COMMAND   4 // External Command Execution
 
 #include <Wire.h>
+#include <RadioLib.h>
 #include "i2c.h"
 #include "mlx90393.h"
 #include "mpu6000.h"
@@ -65,6 +66,8 @@ uint16_t MPU6000_accel_scale = 0;
 ///////////
 // SETUP //
 ///////////
+
+SX1272 radio = NULL;
 
 void setup()
 {
@@ -103,7 +106,7 @@ void setup()
 
 #ifdef USING_SX1272
     // SX1272 initialization and setup.
-    sx1272_init()
+    radio = sx1272_init()
 #endif // USING_SX1272
 }
 
@@ -161,6 +164,7 @@ void loop()
 
 #ifdef USING_SX1272
     // TODO: Manual radio T/RX, probably with an interrupt handler.
+    
 #endif // USING_SX1272
 
     ///////////////////////////////

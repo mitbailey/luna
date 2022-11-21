@@ -1,7 +1,7 @@
 /**
  * @file adv_pingpong2.c
  * @author Mit Bailey (mitbailey99@gmail.com)
- * @brief Radio ping-pong for LunaSat 1 & 2.
+ * @brief Advanced radio ping-pong for LunaSat 1 & 2.
  * @version See Git tags for version information.
  * @date 2022.11.21
  *
@@ -10,7 +10,7 @@
  */
 
 // Successful back-and-forth b/w LunaSat 1 & 2
-// 08:33 2022.11.21
+// 09:54 2022.11.21
 
 /*
    RadioLib SX127x Ping-Pong Example
@@ -37,6 +37,35 @@ SX1272 radio = new Module(10, 2, 9, 3);
 bool transmitter = false;
 bool transmitting = transmitter;
 String ID;
+
+unsigned long last_tx = 0;
+#define TX_TIMER 10000
+
+// flag to indicate that a packet was received
+volatile bool freshPacket = false;
+
+// disable interrupt when it's not needed
+volatile bool enableInterrupt = false;
+
+// this function is called when a complete packet
+// is received by the module
+// IMPORTANT: this function MUST be 'void' type
+//            and MUST NOT have any arguments!
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+void setFlag(void) {
+    Serial.println("setFlag called!");
+
+    // check if the interrupt is enabled
+    if(!enableInterrupt) 
+    {
+        return;
+    }
+
+    // we got a packet, set the flag
+    freshPacket = true;
+}
 
 void setup() {
     pinMode(LED1, OUTPUT);
@@ -69,12 +98,29 @@ void setup() {
     radio.setSpreadingFactor(12);
     radio.setBandwidth(250.0);
     radio.setOutputPower(17);
+
+    radio.setDio0Action(setFlag);
+    state = radio.startReceive();
+    if (state == RADIOLIB_ERR_NONE)
+    {
+        Serial.println("Now listening...");
+    }
+    else
+    {
+        Serial.println("FATAL: Failed to listen!");
+        for(;;);
+    }
+
+    enableInterrupt = true;
 }
 
+bool timedout = false;
 void loop()
-{
-    if (transmitting)
+{   
+    if (transmitting || timedout)
     {
+        timedout = false;
+
         // Transmitting
         digitalWrite(LED1, HIGH);
         digitalWrite(LED2, LOW); 
@@ -82,6 +128,8 @@ void loop()
         delay(500);
 
         Serial.println("Beginning transmit...");
+        last_tx = millis();
+        enableInterrupt = false;
         int state = radio.transmit("Hello from " + ID + "!");
 
         if (state == RADIOLIB_ERR_NONE) {
@@ -109,66 +157,69 @@ void loop()
             Serial.println(state);
 
         }
+
+        enableInterrupt = true;
+        radio.startReceive();
+    
     }
-    else
+    else if (freshPacket)
     {
-        // Receiving
+        Serial.println("Got fresh packet!");
+
         digitalWrite(LED1, LOW);
-        digitalWrite(LED2, HIGH); 
+        digitalWrite(LED2, HIGH);
+
+        enableInterrupt = false;
+        freshPacket = false;
 
         String str;
-        Serial.println("Beginning receive...");
-        int state = radio.receive(str);
+        int state = radio.readData(str);
+        // you can also read received data as byte array
+        /*
+        byte byteArr[8];
+        int state = radio.readData(byteArr, 8);
+        */
 
         if (state == RADIOLIB_ERR_NONE) 
         {
             // packet was successfully received
-            Serial.println(F("success!"));
+            Serial.println(F("[SX1272] Received packet!"));
 
-            // print the data of the packet
-            Serial.print(F("[SX1272] Data:\t\t\t"));
+            // print data of the packet
+            Serial.print(F("[SX1272] Data:\t\t"));
             Serial.println(str);
 
-            // print the RSSI (Received Signal Strength Indicator)
+            // print RSSI (Received Signal Strength Indicator)
             // of the last received packet
-            Serial.print(F("[SX1272] RSSI:\t\t\t"));
+            Serial.print(F("[SX1272] RSSI:\t\t"));
             Serial.print(radio.getRSSI());
             Serial.println(F(" dBm"));
-
-            // print the SNR (Signal-to-Noise Ratio)
-            // of the last received packet
-            Serial.print(F("[SX1272] SNR:\t\t\t"));
-            Serial.print(radio.getSNR());
-            Serial.println(F(" dB"));
-
-            // print frequency error
-            // of the last received packet
-            Serial.print(F("[SX1272] Frequency error:\t"));
-            Serial.print(radio.getFrequencyError());
-            Serial.println(F(" Hz"));
-
-            transmitting = true;
-
-        } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-            // timeout occurred while waiting for a packet
-            Serial.println(F("timeout!"));
-
-            if (transmitter)
-            {
-                transmitting = true;
-            }
-
-        } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+        } 
+        else if (state == RADIOLIB_ERR_CRC_MISMATCH) 
+        {
             // packet was received, but is malformed
             Serial.println(F("CRC error!"));
-
-        } else {
+        } 
+        else 
+        {
             // some other error occurred
             Serial.print(F("failed, code "));
             Serial.println(state);
         }
-    }
 
-    // digitalWrite(LED1, LOW);
-    // digitalWrite(LED2, LOW);    
+        // put module back to listen mode
+        radio.startReceive();
+
+        // we're ready to receive more packets,
+        // enable interrupt service routine
+        enableInterrupt = true;
+        transmitting = true;
+    }
+    else
+    {
+        if (millis() - last_tx > TX_TIMER)
+        {
+            timedout = true;
+        }
+    }
 }
