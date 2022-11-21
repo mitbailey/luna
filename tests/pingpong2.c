@@ -1,3 +1,6 @@
+// Successful back-and-forth b/w LunaSat 1 & 2
+// 08:33 2022.11.21
+
 /*
    RadioLib SX127x Ping-Pong Example
    For default module settings, see the wiki page
@@ -49,6 +52,12 @@ void setup() {
     {
         ID = "RECEIVER";
     }
+
+    radio.setFrequency(915.0);
+    radio.setCodingRate(8);
+    radio.setSpreadingFactor(12);
+    radio.setBandwidth(250.0);
+    radio.setOutputPower(17);
 }
 
 void loop()
@@ -59,6 +68,9 @@ void loop()
         digitalWrite(LED1, HIGH);
         digitalWrite(LED2, LOW); 
 
+        delay(500);
+
+        Serial.println("Beginning transmit...");
         int state = radio.transmit("Hello from " + ID + "!");
 
         if (state == RADIOLIB_ERR_NONE) {
@@ -94,6 +106,7 @@ void loop()
         digitalWrite(LED2, HIGH); 
 
         String str;
+        Serial.println("Beginning receive...");
         int state = radio.receive(str);
 
         if (state == RADIOLIB_ERR_NONE) 
@@ -129,6 +142,11 @@ void loop()
             // timeout occurred while waiting for a packet
             Serial.println(F("timeout!"));
 
+            if (transmitter)
+            {
+                transmitting = true;
+            }
+
         } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
             // packet was received, but is malformed
             Serial.println(F("CRC error!"));
@@ -139,8 +157,6 @@ void loop()
             Serial.println(state);
         }
     }
-
-    delay(1000);
 
     // digitalWrite(LED1, LOW);
     // digitalWrite(LED2, LOW);    
