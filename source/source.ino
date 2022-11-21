@@ -69,6 +69,27 @@ uint16_t MPU6000_accel_scale = 0;
 
 SX1272 radio = NULL;
 
+bool sx1272_fresh_packet = false;
+bool sx1272_enable_irq = false;
+
+// this function is called when a complete packet
+// is received by the module
+// IMPORTANT: this function MUST be 'void' type
+//            and MUST NOT have any arguments!
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+void setFlag(void) {
+    // check if the interrupt is enabled
+    if(!sx1272_enable_irq) 
+    {
+        return;
+    }
+
+    // we got a packet, set the flag
+    sx1272_fresh_packet = true;
+}
+
 void setup()
 {
     // NOTE: Setup sequences taken from the basic setup examples found in: 
@@ -106,7 +127,10 @@ void setup()
 
 #ifdef USING_SX1272
     // SX1272 initialization and setup.
-    radio = sx1272_init()
+    radio = sx1272_init();
+    radio.setDio0Action(setFlag);
+    radio.startReceive();
+    sx1272_enable_irq = true;
 #endif // USING_SX1272
 }
 
@@ -163,8 +187,55 @@ void loop()
     ////////////////////////////
 
 #ifdef USING_SX1272
+    // Receiving (Transmission is at end of loop)
     // TODO: Manual radio T/RX, probably with an interrupt handler.
-    
+    // TODO: Parse the received data for a possible command.
+    // TODO: Handle any parsed commands.
+
+    if (sx1272_fresh_packet)
+    {
+        sx1272_enable_irq = false;
+        sx1272_fresh_packet = false;
+        // TODO: Get rid of this arduino String garbage.
+        String str;
+        int rd_stat = radio = readData(str);
+        // you can also read received data as byte array
+        /*
+        byte byteArr[8];
+        int rd_stat = radio.readData(byteArr, 8);
+        */
+
+        if (rd_stat == RADIOLIB_ERR_NONE) 
+        {
+            // packet was successfully received
+            Serial.println(F("[SX1272] Received packet!"));
+
+            // print data of the packet
+            Serial.print(F("[SX1272] Data:\t\t"));
+            Serial.println(str);
+
+            // print RSSI (Received Signal Strength Indicator)
+            // of the last received packet
+            Serial.print(F("[SX1272] RSSI:\t\t"));
+            Serial.print(radio.getRSSI());
+            Serial.println(F(" dBm"));
+        } 
+        else if (rd_stat == RADIOLIB_ERR_CRC_MISMATCH) 
+        {
+            // packet was received, but is malformed
+            Serial.println(F("CRC error!"));
+        } 
+        else 
+        {
+            // some other error occurred
+            Serial.print(F("failed, code "));
+            Serial.println(rd_stat);
+        }
+       
+        radio.startReceive();
+        sx1272_enable_irq = true;
+    }
+
 #endif // USING_SX1272
 
     ///////////////////////////////
@@ -521,6 +592,38 @@ void loop()
 
 #ifdef USING_SX1272
     // TODO: Figure out transmissions.
+
+    sx1272_enable_irq = false;
+    int tx_stat = radio.transmit("This is a transmission test.");
+
+    if (tx_stat == RADIOLIB_ERR_NONE) {
+        // the packet was successfully transmitted
+        Serial.println(F(" success!"));
+
+        // print measured data rate
+        Serial.print(F("[SX1272] Datarate:\t"));
+        Serial.print(radio.getDataRate());
+        Serial.println(F(" bps"));
+
+        transmitting = false;
+
+    } else if (tx_stat == RADIOLIB_ERR_PACKET_TOO_LONG) {
+        // the supplied packet was longer than 256 bytes
+        Serial.println(F("too long!"));
+
+    } else if (tx_stat == RADIOLIB_ERR_TX_TIMEOUT) {
+        // timeout occurred while transmitting packet
+        Serial.println(F("timeout!"));
+
+    } else {
+        // some other error occurred
+        Serial.print(F("failed, code "));
+        Serial.println(tx_stat);
+    }
+
+    sx1272_enable_irq = true;
+    radio.startReceive();
+
 #endif // USING_SX1272
 
     time_2 = millis();
