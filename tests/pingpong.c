@@ -178,8 +178,11 @@ void loop() {
         enableInterrupt = true;
 
     }
-    Serial.println("SHOULDNT BE HERE");
+    else
+    {
+        Serial.println("SHOULDNT BE HERE");
+        digitalWrite(LED1, LOW);
+        digitalWrite(LED2, LOW);
+    }
 
-    digitalWrite(LED1, LOW);
-    digitalWrite(LED2, LOW);
 }
