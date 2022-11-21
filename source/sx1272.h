@@ -24,11 +24,18 @@
 #define SX1272_SF        12 // Spreading Factor
 #define SX1272_CR        8 // Coding Rate
 
+#include <RadioLib.h>
 #include "i2c.h"
 
-int8_t sx1272_init()
+SX1272 sx1272_init()
 {
-    return -1;
+    SX1272 radio = new Module(SX1272_NSS_PIN, SX1272_DIO0_PIN, SX1272_RESET_PIN, SX1272_DIO1_PIN);
+    radio.setFrequency(SX1272_FREQ);
+    radio.setCodingRate(SX1272_CR);
+    radio.setSpreadingFactor(SX1272_SF);
+    radio.setOutputPower(SX1272_PWR);
+
+    return radio;
 }
 
 #endif // SX1272_H
