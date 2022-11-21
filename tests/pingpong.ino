@@ -13,16 +13,16 @@
 // of the nodes to initiate the pings
 //#define INITIATING_NODE
 
-// SX1278 has the following connections:
+// SX1272 has the following connections:
 // NSS pin:   10
 // DIO0 pin:  2
 // NRST pin:  9
 // DIO1 pin:  3
-SX1278 radio = new Module(10, 2, 9, 3);
+SX1272 radio = new Module(10, 2, 9, 3);
 
 // or using RadioShield
 // https://github.com/jgromes/RadioShield
-//SX1278 radio = RadioShield.ModuleA;
+//SX1272 radio = RadioShield.ModuleA;
 
 // save transmission states between loops
 int transmissionState = RADIOLIB_ERR_NONE;
@@ -53,8 +53,8 @@ void setFlag(void) {
 void setup() {
   Serial.begin(9600);
 
-  // initialize SX1278 with default settings
-  Serial.print(F("[SX1278] Initializing ... "));
+  // initialize SX1272 with default settings
+  Serial.print(F("[SX1272] Initializing ... "));
   int state = radio.begin();
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println(F("success!"));
@@ -70,12 +70,12 @@ void setup() {
 
   #if defined(INITIATING_NODE)
     // send the first packet on this node
-    Serial.print(F("[SX1278] Sending first packet ... "));
+    Serial.print(F("[SX1272] Sending first packet ... "));
     transmissionState = radio.startTransmit("Hello World!");
     transmitFlag = true;
   #else
     // start listening for LoRa packets on this node
-    Serial.print(F("[SX1278] Starting to listen ... "));
+    Serial.print(F("[SX1272] Starting to listen ... "));
     state = radio.startReceive();
     if (state == RADIOLIB_ERR_NONE) {
       Serial.println(F("success!"));
@@ -122,19 +122,19 @@ void loop() {
 
       if (state == RADIOLIB_ERR_NONE) {
         // packet was successfully received
-        Serial.println(F("[SX1278] Received packet!"));
+        Serial.println(F("[SX1272] Received packet!"));
 
         // print data of the packet
-        Serial.print(F("[SX1278] Data:\t\t"));
+        Serial.print(F("[SX1272] Data:\t\t"));
         Serial.println(str);
 
         // print RSSI (Received Signal Strength Indicator)
-        Serial.print(F("[SX1278] RSSI:\t\t"));
+        Serial.print(F("[SX1272] RSSI:\t\t"));
         Serial.print(radio.getRSSI());
         Serial.println(F(" dBm"));
 
         // print SNR (Signal-to-Noise Ratio)
-        Serial.print(F("[SX1278] SNR:\t\t"));
+        Serial.print(F("[SX1272] SNR:\t\t"));
         Serial.print(radio.getSNR());
         Serial.println(F(" dB"));
 
@@ -144,7 +144,7 @@ void loop() {
       delay(1000);
 
       // send another one
-      Serial.print(F("[SX1278] Sending another packet ... "));
+      Serial.print(F("[SX1272] Sending another packet ... "));
       transmissionState = radio.startTransmit("Hello World!");
       transmitFlag = true;
     }
