@@ -19,22 +19,22 @@
 // include the library
 #include <RadioLib.h>
 
-// SX1278 has the following connections:
+// SX1272 has the following connections:
 // NSS pin:   10
 // DIO0 pin:  2
 // RESET pin: 9
 // DIO1 pin:  3
-SX1278 radio = new Module(10, 2, 9, 3);
+SX1272 radio = new Module(10, 2, 9, 3);
 
 // or using RadioShield
 // https://github.com/jgromes/RadioShield
-//SX1278 radio = RadioShield.ModuleA;
+//SX1272 radio = RadioShield.ModuleA;
 
 void setup() {
   Serial.begin(9600);
 
-  // initialize SX1278 with default settings
-  Serial.print(F("[SX1278] Initializing ... "));
+  // initialize SX1272 with default settings
+  Serial.print(F("[SX1272] Initializing ... "));
   int state = radio.begin();
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println(F("success!"));
@@ -46,7 +46,7 @@ void setup() {
 }
 
 void loop() {
-  Serial.print(F("[SX1278] Waiting for incoming transmission ... "));
+  Serial.print(F("[SX1272] Waiting for incoming transmission ... "));
 
   // you can receive data as an Arduino String
   // NOTE: receive() is a blocking method!
@@ -66,24 +66,24 @@ void loop() {
     Serial.println(F("success!"));
 
     // print the data of the packet
-    Serial.print(F("[SX1278] Data:\t\t\t"));
+    Serial.print(F("[SX1272] Data:\t\t\t"));
     Serial.println(str);
 
     // print the RSSI (Received Signal Strength Indicator)
     // of the last received packet
-    Serial.print(F("[SX1278] RSSI:\t\t\t"));
+    Serial.print(F("[SX1272] RSSI:\t\t\t"));
     Serial.print(radio.getRSSI());
     Serial.println(F(" dBm"));
 
     // print the SNR (Signal-to-Noise Ratio)
     // of the last received packet
-    Serial.print(F("[SX1278] SNR:\t\t\t"));
+    Serial.print(F("[SX1272] SNR:\t\t\t"));
     Serial.print(radio.getSNR());
     Serial.println(F(" dB"));
 
     // print frequency error
     // of the last received packet
-    Serial.print(F("[SX1278] Frequency error:\t"));
+    Serial.print(F("[SX1272] Frequency error:\t"));
     Serial.print(radio.getFrequencyError());
     Serial.println(F(" Hz"));
 
