@@ -99,6 +99,5 @@ void loop() {
     // some other error occurred
     Serial.print(F("failed, code "));
     Serial.println(state);
-
   }
 }
