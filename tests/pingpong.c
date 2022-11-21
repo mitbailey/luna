@@ -37,21 +37,21 @@ bool transmitFlag = false;
 volatile bool enableInterrupt = true;
 
 // flag to indicate that a packet was sent or received
-// volatile bool operationDone = false;
+volatile bool operationDone = false;
 
 // this function is called when a complete packet
 // is transmitted or received by the module
 // IMPORTANT: this function MUST be 'void' type
 //            and MUST NOT have any arguments!
-// void setFlag(void) {
-//     // check if the interrupt is enabled
-//     if(!enableInterrupt) {
-//         return;
-//     }
+void setFlag(void) {
+  // check if the interrupt is enabled
+  if(!enableInterrupt) {
+    return;
+  }
 
-//     // we sent or received  packet, set the flag
-//     operationDone = true;
-// }
+  // we sent or received  packet, set the flag
+  operationDone = true;
+}
 
 void setup() {
     pinMode(LED1, OUTPUT);
@@ -72,7 +72,7 @@ void setup() {
 
     // set the function that will be called
     // when new packet is received
-    // radio.setDio0Action(setFlag);
+    radio.setDio0Action(setFlag);
 
 #if defined(INITIATING_NODE)
     // send the first packet on this node
@@ -82,8 +82,7 @@ void setup() {
 #else
     // start listening for LoRa packets on this node
     Serial.print(F("[SX1272] Starting to listen ... "));
-    String str;
-    state = radio.startReceive(str);
+    state = radio.startReceive();
     if (state == RADIOLIB_ERR_NONE) {
       Serial.println(F("success!"));
     } else {
@@ -95,16 +94,15 @@ void setup() {
 }
 
 void loop() {
-    int state = 0;
     // check if the previous operation finished
-    // if(operationDone) 
-    // {
+    if(operationDone) 
+    {
         // disable the interrupt service routine while
         // processing the data
         enableInterrupt = false;
 
         // reset flag
-        // operationDone = false;
+        operationDone = false;
 
         if(transmitFlag) 
         {
@@ -125,49 +123,8 @@ void loop() {
             }
 
         // listen for response
-        String str;
-        state = radio.startReceive(str);
+        radio.startReceive();
         transmitFlag = false;
-
-        if (state == RADIOLIB_ERR_NONE) {
-            // packet was successfully received
-            Serial.println(F("success!"));
-
-            // print the data of the packet
-            Serial.print(F("[SX1272] Data:\t\t\t"));
-            Serial.println(str);
-
-            // print the RSSI (Received Signal Strength Indicator)
-            // of the last received packet
-            Serial.print(F("[SX1272] RSSI:\t\t\t"));
-            Serial.print(radio.getRSSI());
-            Serial.println(F(" dBm"));
-
-            // print the SNR (Signal-to-Noise Ratio)
-            // of the last received packet
-            Serial.print(F("[SX1272] SNR:\t\t\t"));
-            Serial.print(radio.getSNR());
-            Serial.println(F(" dB"));
-
-            // print frequency error
-            // of the last received packet
-            Serial.print(F("[SX1272] Frequency error:\t"));
-            Serial.print(radio.getFrequencyError());
-            Serial.println(F(" Hz"));
-
-        } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-            // timeout occurred while waiting for a packet
-            Serial.println(F("timeout!"));
-
-        } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
-            // packet was received, but is malformed
-            Serial.println(F("CRC error!"));
-
-        } else {
-            // some other error occurred
-            Serial.print(F("failed, code "));
-            Serial.println(state);
-        }
 
         } 
         else 
@@ -202,8 +159,6 @@ void loop() {
             }
 
             // wait a second before transmitting again
-            digitalWrite(LED1, LOW);
-            digitalWrite(LED2, LOW);
             delay(1000);
 
             // send another one
@@ -216,7 +171,8 @@ void loop() {
         // enable interrupt service routine
         enableInterrupt = true;
 
-    // }
-    digitalWrite(LED1, HIGH);
-    digitalWrite(LED2, HIGH);
+    }
+
+    digitalWrite(LED1, LOW);
+    digitalWrite(LED2, LOW);
 }
