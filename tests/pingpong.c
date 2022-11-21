@@ -82,7 +82,8 @@ void setup() {
 #else
     // start listening for LoRa packets on this node
     Serial.print(F("[SX1272] Starting to listen ... "));
-    state = radio.startReceive();
+    String str;
+    state = radio.startReceive(str);
     if (state == RADIOLIB_ERR_NONE) {
       Serial.println(F("success!"));
     } else {
@@ -124,9 +125,10 @@ void loop() {
             }
 
         // listen for response
-        state = radio.startReceive();
+        String str;
+        state = radio.startReceive(str);
         transmitFlag = false;
-        
+
         if (state == RADIOLIB_ERR_NONE) {
             // packet was successfully received
             Serial.println(F("success!"));
