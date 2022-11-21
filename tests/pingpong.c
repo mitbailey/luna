@@ -94,9 +94,12 @@ void setup() {
 }
 
 void loop() {
+    Serial.println("BEGINNING LOOP");
+
     // check if the previous operation finished
     if(operationDone) 
     {
+        Serial.println("operationDone");
         // disable the interrupt service routine while
         // processing the data
         enableInterrupt = false;
@@ -106,6 +109,7 @@ void loop() {
 
         if(transmitFlag) 
         {
+            Serial.println("transmitFlag");
             digitalWrite(LED1, HIGH);
             digitalWrite(LED2, LOW);
 
@@ -129,6 +133,7 @@ void loop() {
         } 
         else 
         {
+            Serial.println("transmitFlag ELSE");
             digitalWrite(LED2, HIGH);
             digitalWrite(LED1, LOW);
 
@@ -167,11 +172,13 @@ void loop() {
             transmitFlag = true;
         }
 
+
         // we're ready to process more packets,
         // enable interrupt service routine
         enableInterrupt = true;
 
     }
+    Serial.println("SHOULDNT BE HERE");
 
     digitalWrite(LED1, LOW);
     digitalWrite(LED2, LOW);
